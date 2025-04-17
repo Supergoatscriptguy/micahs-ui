@@ -496,18 +496,20 @@ end
 function Utility.applyCustomScrollbar(scrollFrame, thickness)
     thickness = thickness or 4
     
-    -- Remove default scrollbar
-    scrollFrame.ScrollBarThickness = thickness
+    -- Remove default scrollbar but keep scrolling enabled
+    scrollFrame.ScrollBarThickness = 0
     scrollFrame.ScrollBarImageTransparency = 1
+    scrollFrame.ScrollingEnabled = true
     
     -- Create custom scrollbar
     local scrollbar = Utility.createInstance("Frame", {
         Name = "CustomScrollbar",
         Size = UDim2.new(0, thickness, 1, 0),
-        Position = UDim2.new(1, 0, 0, 0),
+        Position = UDim2.new(1, -thickness, 0, 0),
         AnchorPoint = Vector2.new(1, 0),
         BackgroundColor3 = SelectedTheme.ScrollBarBackground,
         BackgroundTransparency = 0.5,
+        ZIndex = 10, -- Ensure it's above content
         Parent = scrollFrame
     })
     
@@ -517,6 +519,7 @@ function Utility.applyCustomScrollbar(scrollFrame, thickness)
         Name = "ScrollThumb",
         Size = UDim2.new(1, 0, 0.2, 0),
         BackgroundColor3 = SelectedTheme.ScrollBarForeground,
+        ZIndex = 11,
         Parent = scrollbar
     })
     
@@ -535,55 +538,64 @@ function Utility.applyCustomScrollbar(scrollFrame, thickness)
         end
         
         local scrollPercent = scrollFrame.CanvasPosition.Y / (canvasSize - frameSize)
-        local thumbSize = math.max(0.1, frameSize / canvasSize)
+        local thumbSize = math.clamp(frameSize / canvasSize, 0.1, 1)
         
         scrollThumb.Size = UDim2.new(1, 0, thumbSize, 0)
         scrollThumb.Position = UDim2.new(0, 0, scrollPercent * (1 - thumbSize), 0)
     end
     
+    -- Connect update events
     scrollFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(updateScrollbar)
     scrollFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateScrollbar)
     scrollFrame:GetPropertyChangedSignal("CanvasSize"):Connect(updateScrollbar)
     
-    -- Dragging functionality for scrollThumb
-    local isThumbDragging = false
-    local startY, startScroll
+    -- Make thumb draggable
+    local isDragging = false
+    local dragStart, startPos
     
     scrollThumb.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            isThumbDragging = true
-            startY = input.Position.Y
-            startScroll = scrollFrame.CanvasPosition.Y
+            isDragging = true
+            dragStart = input.Position.Y
+            startPos = scrollFrame.CanvasPosition.Y
         end
     end)
     
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            isThumbDragging = false
+            isDragging = false
         end
     end)
     
     UserInputService.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement and isThumbDragging then
-            local delta = input.Position.Y - startY
+        if input.UserInputType == Enum.UserInputType.MouseMovement and isDragging then
+            local delta = input.Position.Y - dragStart
             local canvasSize = scrollFrame.CanvasSize.Y.Offset
             local frameSize = scrollFrame.AbsoluteSize.Y
             
-            local scrollMove = (delta / frameSize) * canvasSize
-            scrollFrame.CanvasPosition = Vector2.new(0, math.clamp(startScroll + scrollMove, 0, canvasSize - frameSize))
+            if canvasSize > frameSize then
+                local scrollMultiplier = (canvasSize - frameSize) / (frameSize * (1 - scrollThumb.Size.Y.Scale))
+                local newPosition = startPos + (delta * scrollMultiplier)
+                scrollFrame.CanvasPosition = Vector2.new(0, math.clamp(newPosition, 0, canvasSize - frameSize))
+            end
         end
     end)
     
-    -- Mouse wheel scrolling
-    scrollFrame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            local relativeY = input.Position.Y - scrollFrame.AbsolutePosition.Y
-            local percentY = relativeY / scrollFrame.AbsoluteSize.Y
+    -- Add mousewheel scrolling as fallback
+    scrollFrame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseWheel then
+            local yScroll = input.Position.Z
+            local currentPos = scrollFrame.CanvasPosition.Y
+            local maxScroll = scrollFrame.CanvasSize.Y.Offset - scrollFrame.AbsoluteSize.Y
             
-            local canvasSize = scrollFrame.CanvasSize.Y.Offset
-            local frameSize = scrollFrame.AbsoluteSize.Y
+            -- Adjust scroll speed
+            local scrollAmount = yScroll * 80
             
-            scrollFrame.CanvasPosition = Vector2.new(0, math.clamp((canvasSize - frameSize) * percentY, 0, canvasSize - frameSize))
+            -- Apply scroll with bounds checking
+            scrollFrame.CanvasPosition = Vector2.new(
+                scrollFrame.CanvasPosition.X,
+                math.clamp(currentPos - scrollAmount, 0, maxScroll)
+            )
         end
     end)
     
@@ -988,7 +1000,7 @@ function LuminaUI:CreateWindow(settings)
         Position = UDim2.new(1, -15, 0.5, 0),
         AnchorPoint = Vector2.new(1, 0.5),
         BackgroundTransparency = 1,
-        Image = "rbxassetid://9801455339", -- Using a more reliable X icon
+        Image = "rbxassetid://6035047409", -- Better X icon
         ImageColor3 = SelectedTheme.TextColor,
         ImageTransparency = 0,
         Parent = Topbar
@@ -1000,7 +1012,7 @@ function LuminaUI:CreateWindow(settings)
         Position = UDim2.new(1, -45, 0.5, 0),
         AnchorPoint = Vector2.new(1, 0.5),
         BackgroundTransparency = 1,
-        Image = "rbxassetid://9801459758", -- Using a more reliable minimize icon
+        Image = "rbxassetid://6035067836", -- Better minimize icon
         ImageColor3 = SelectedTheme.TextColor,
         ImageTransparency = 0,
         Parent = Topbar
@@ -1301,6 +1313,31 @@ function LuminaUI:CreateWindow(settings)
         minimized = not minimized
         
         if minimized then
+            -- Create restore button when minimized
+            local RestoreButton = Utility.createInstance("ImageButton", {
+                Name = "Restore",
+                Size = UDim2.new(0, 18, 0, 18),
+                Position = UDim2.new(1, -45, 0.5, 0),
+                AnchorPoint = Vector2.new(1, 0.5),
+                BackgroundTransparency = 1,
+                Image = "rbxassetid://6035067836", -- Same icon, will be rotated
+                ImageColor3 = SelectedTheme.TextColor,
+                ImageTransparency = 0,
+                Rotation = 180, -- Flip the icon
+                Parent = Topbar
+            })
+            
+            RestoreButton.MouseButton1Click:Connect(function()
+                minimized = false
+                TweenService:Create(MainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Quart), {
+                    Size = settings.Size
+                }):Play()
+                RestoreButton:Destroy()
+                MinimizeButton.Visible = true
+            end)
+            
+            MinimizeButton.Visible = false
+            
             TweenService:Create(MainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Quart), {
                 Size = UDim2.new(0, MainFrame.Size.X.Offset, 0, 45)
             }):Play()
@@ -1639,9 +1676,10 @@ function LuminaUI:CreateWindow(settings)
             Name = tabName,
             Size = UDim2.new(1, 0, 1, 0),
             BackgroundTransparency = 1,
-            ScrollBarThickness = 0,
+            ScrollBarThickness = 0, -- We'll use custom scrollbar
+            ScrollingEnabled = true, -- Enable scrolling
             BorderSizePixel = 0,
-            CanvasSize = UDim2.new(0, 0, 0, 0),
+            CanvasSize = UDim2.new(0, 0, 0, 0), -- Will be updated automatically
             Visible = false,
             ScrollingDirection = Enum.ScrollingDirection.Y,
             Parent = ElementsPageFolder
@@ -1671,6 +1709,7 @@ function LuminaUI:CreateWindow(settings)
         -- Handle tab selection
         TabInteract.MouseButton1Click:Connect(function()
             if TabPage then
+                -- First, handle visual selection of tabs
                 for _, otherTab in pairs(TabScrollFrame:GetChildren()) do
                     if otherTab:IsA("Frame") then
                         local isSelected = otherTab == TabButton
@@ -1689,8 +1728,20 @@ function LuminaUI:CreateWindow(settings)
                     end
                 end
                 
+                -- Then, ensure only the selected page is visible
                 for _, page in pairs(ElementsPageFolder:GetChildren()) do
                     page.Visible = page.Name == tabName
+                end
+                
+                -- Reset canvas position to top when switching tabs
+                if TabPage.Visible then
+                    TabPage.CanvasPosition = Vector2.new(0, 0)
+                end
+                
+                -- Settings page should be hidden when a regular tab is selected
+                local settingsPage = ElementsPageFolder:FindFirstChild("Settings")
+                if settingsPage and TabPage ~= settingsPage then
+                    settingsPage.Visible = false
                 end
             end
         end)
