@@ -592,6 +592,171 @@ function Utility.applyCustomScrollbar(scrollFrame, thickness)
     return scrollbar
 end
 
+-- Add these to your Utility functions
+
+function Utility.rippleEffect(parent, color)
+    color = color or Color3.fromRGB(255, 255, 255)
+    
+    local ripple = Utility.createInstance("Frame", {
+        Name = "Ripple",
+        BackgroundColor3 = color,
+        BackgroundTransparency = 0.7,
+        Position = UDim2.new(0, Mouse.X - parent.AbsolutePosition.X, 0, Mouse.Y - parent.AbsolutePosition.Y),
+        Size = UDim2.new(0, 0, 0, 0),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Parent = parent
+    })
+    
+    Utility.createCorner(ripple, 100)
+    
+    local diameter = math.max(parent.AbsoluteSize.X, parent.AbsoluteSize.Y) * 2
+    
+    TweenService:Create(ripple, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, diameter, 0, diameter),
+        BackgroundTransparency = 1
+    }):Play()
+    
+    task.delay(0.5, function()
+        ripple:Destroy()
+    end)
+end
+
+function Utility.pulseEffect(object, scaleIncrease, duration)
+    scaleIncrease = scaleIncrease or 1.05
+    duration = duration or 0.2
+    
+    local originalSize = object.Size
+    
+    -- Scale up
+    TweenService:Create(object, TweenInfo.new(duration, Enum.EasingStyle.Quad), {
+        Size = UDim2.new(
+            originalSize.X.Scale * scaleIncrease,
+            originalSize.X.Offset * scaleIncrease,
+            originalSize.Y.Scale * scaleIncrease,
+            originalSize.Y.Offset * scaleIncrease
+        )
+    }):Play()
+    
+    -- Scale back
+    task.delay(duration, function()
+        TweenService:Create(object, TweenInfo.new(duration, Enum.EasingStyle.Quad), {
+            Size = originalSize
+        }):Play()
+    end)
+end
+
+function Utility.typewriteEffect(textLabel, text, speed)
+    speed = speed or 0.03
+    
+    textLabel.Text = ""
+    local displayText = ""
+    
+    for i = 1, #text do
+        displayText = displayText .. text:sub(i, i)
+        textLabel.Text = displayText
+        wait(speed)
+    end
+end
+
+function Utility.createBlur(parent, strength)
+    strength = strength or 10
+    
+    local blur = Utility.createInstance("BlurEffect", {
+        Size = 0,
+        Parent = parent
+    })
+    
+    TweenService:Create(blur, TweenInfo.new(0.3), {
+        Size = strength
+    }):Play()
+    
+    return blur
+end
+
+function Utility.removeBlur(blur)
+    TweenService:Create(blur, TweenInfo.new(0.3), {
+        Size = 0
+    }):Play()
+    
+    task.delay(0.3, function()
+        blur:Destroy()
+    end)
+end
+
+-- Enhanced Tab Selection Animation
+-- Add this inside the tab selection handler
+function enhancedTabSelection(tab, page)
+    -- First animate all tabs to deselected state
+    for _, otherTab in ipairs(TabScrollFrame:GetChildren()) do
+        if otherTab:IsA("Frame") and otherTab ~= tab then
+            TweenService:Create(otherTab, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+                BackgroundColor3 = SelectedTheme.TabBackground,
+                BackgroundTransparency = 0.7
+            }):Play()
+            
+            if otherTab:FindFirstChild("Title") then
+                TweenService:Create(otherTab.Title, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+                    TextColor3 = SelectedTheme.TabTextColor,
+                    TextTransparency = 0.2
+                }):Play()
+            end
+            
+            if otherTab:FindFirstChild("Icon") then
+                TweenService:Create(otherTab.Icon, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+                    ImageColor3 = SelectedTheme.TabTextColor,
+                    ImageTransparency = 0.2
+                }):Play()
+            end
+        end
+    end
+    
+    -- Animate all pages to hidden
+    for _, otherPage in ipairs(ElementsPageFolder:GetChildren()) do
+        if otherPage:IsA("ScrollingFrame") and otherPage ~= page then
+            TweenService:Create(otherPage, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+                Position = UDim2.new(0, 20, 0, 0),
+                BackgroundTransparency = 1
+            }):Play()
+            
+            task.delay(0.2, function()
+                otherPage.Visible = false
+            end)
+        end
+    end
+    
+    -- Select the active tab with animation
+    TweenService:Create(tab, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+        BackgroundColor3 = SelectedTheme.TabBackgroundSelected,
+        BackgroundTransparency = 0
+    }):Play()
+    
+    if tab:FindFirstChild("Title") then
+        TweenService:Create(tab.Title, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+            TextColor3 = SelectedTheme.SelectedTabTextColor,
+            TextTransparency = 0
+        }):Play()
+    end
+    
+    if tab:FindFirstChild("Icon") then
+        TweenService:Create(tab.Icon, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+            ImageColor3 = SelectedTheme.SelectedTabTextColor,
+            ImageTransparency = 0
+        }):Play()
+        
+        Utility.pulseEffect(tab.Icon)
+    end
+    
+    -- Show and animate the selected page
+    page.Position = UDim2.new(0, -20, 0, 0)
+    page.BackgroundTransparency = 1
+    page.Visible = true
+    
+    TweenService:Create(page, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 0
+    }):Play()
+end
+
 -- UI Creation Functions
 function LuminaUI:CreateWindow(settings)
     settings = settings or {}
@@ -829,18 +994,18 @@ function LuminaUI:CreateWindow(settings)
     end
     
     -- Control buttons
-    local CloseButton = Utility.createInstance("ImageButton", {
-        Name = "Close",
-        Size = UDim2.new(0, 18, 0, 18),
-        Position = UDim2.new(1, -15, 0.5, 0),
-        AnchorPoint = Vector2.new(1, 0.5),
-        BackgroundTransparency = 1,
-        Image = "rbxassetid://10734953387",
-        ImageColor3 = SelectedTheme.TextColor,
-        ImageTransparency = 0.2,
-        Parent = Topbar
-    })
-    
+-- Fix for Close Button - modify this in the code where CloseButton is created
+local CloseButton = Utility.createInstance("ImageButton", {
+    Name = "Close",
+    Size = UDim2.new(0, 18, 0, 18),
+    Position = UDim2.new(1, -15, 0.5, 0),
+    AnchorPoint = Vector2.new(1, 0.5),
+    BackgroundTransparency = 1,
+    Image = "rbxassetid://10734953387",
+    ImageColor3 = SelectedTheme.TextColor,
+    ImageTransparency = 0, -- Changed from 0.2 to 0 to make it visible
+    Parent = Topbar
+})    
     local MinimizeButton = Utility.createInstance("ImageButton", {
         Name = "Minimize",
         Size = UDim2.new(0, 18, 0, 18),
@@ -1415,71 +1580,7 @@ function LuminaUI:CreateWindow(settings)
         
         -- Handle tab selection
         TabInteract.MouseButton1Click:Connect(function()
-            for _, tab in ipairs(TabScrollFrame:GetChildren()) do
-                if tab:IsA("Frame") and tab ~= TabButton then
-                    -- Deselect other tabs
-                    TweenService:Create(tab, TweenInfo.new(0.3), {
-                        BackgroundColor3 = SelectedTheme.TabBackground,
-                        BackgroundTransparency = 0.7
-                    }):Play()
-                    
-                    if tab:FindFirstChild("Title") then
-                        TweenService:Create(tab.Title, TweenInfo.new(0.3), {
-                            TextColor3 = SelectedTheme.TabTextColor,
-                            TextTransparency = 0.2
-                        }):Play()
-                    end
-                    
-                    if tab:FindFirstChild("Icon") then
-                        TweenService:Create(tab.Icon, TweenInfo.new(0.3), {
-                            ImageColor3 = SelectedTheme.TabTextColor,
-                            ImageTransparency = 0.2
-                        }):Play()
-                    end
-                    
-                    local tabUIStroke = tab:FindFirstChildOfClass("UIStroke")
-                    if tabUIStroke then
-                        TweenService:Create(tabUIStroke, TweenInfo.new(0.3), {
-                            Transparency = 0.5
-                        }):Play()
-                    end
-                end
-            end
-            
-            -- Hide all pages
-            for _, page in ipairs(ElementsPageFolder:GetChildren()) do
-                if page:IsA("ScrollingFrame") and page.Name ~= "Settings" then
-                    page.Visible = false
-                end
-            end
-            
-            -- Select this tab
-            TweenService:Create(TabButton, TweenInfo.new(0.3), {
-                BackgroundColor3 = SelectedTheme.TabBackgroundSelected,
-                BackgroundTransparency = 0
-            }):Play()
-            
-            TweenService:Create(TabTitle, TweenInfo.new(0.3), {
-                TextColor3 = SelectedTheme.SelectedTabTextColor,
-                TextTransparency = 0
-            }):Play()
-            
-            if TabButton:FindFirstChild("Icon") then
-                TweenService:Create(TabButton.Icon, TweenInfo.new(0.3), {
-                    ImageColor3 = SelectedTheme.SelectedTabTextColor,
-                    ImageTransparency = 0
-                }):Play()
-            end
-            
-            if TabUIStroke then
-                TweenService:Create(TabUIStroke, TweenInfo.new(0.3), {
-                    Transparency = 0
-                }):Play()
-            end
-            
-            -- Show this page
-            TabPage.Visible = true
-            TabPage.CanvasPosition = Vector2.new(0, 0)
+            enhancedTabSelection(TabButton, TabPage)
         end)
         
         -- Add Tab methods and return Tab object
@@ -1518,8 +1619,920 @@ function LuminaUI:CreateWindow(settings)
             
             return SectionContainer
         end
-        
+
+        function Tab:CreateButton(options)
+            options = options or {}
+            options.Name = options.Name or "Button"
+            options.Callback = options.Callback or function() end
+            options.Icon = options.Icon or 0
+            options.Tooltip = options.Tooltip or nil
+            
+            local ButtonContainer = Utility.createInstance("Frame", {
+                Name = "Button_" .. options.Name,
+                Size = UDim2.new(1, 0, 0, 36),
+                BackgroundColor3 = SelectedTheme.ElementBackground,
+                Parent = TabPage
+            })
+            
+            Utility.createCorner(ButtonContainer, 4)
+            
+            -- Add icon if provided
+            local iconPadding = 0
+            if options.Icon ~= 0 then
+                local ButtonIcon = Utility.createInstance("ImageLabel", {
+                    Name = "Icon",
+                    Size = UDim2.new(0, 20, 0, 20),
+                    Position = UDim2.new(0, 8, 0.5, 0),
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    BackgroundTransparency = 1,
+                    Image = Utility.loadIcon(options.Icon),
+                    ImageColor3 = SelectedTheme.TextColor,
+                    Parent = ButtonContainer
+                })
+                iconPadding = 30
+            end
+            
+            local ButtonTitle = Utility.createInstance("TextLabel", {
+                Name = "Title",
+                Size = UDim2.new(1, -(10 + iconPadding), 1, 0),
+                Position = UDim2.new(0, 10 + iconPadding, 0, 0),
+                BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham,
+                Text = options.Name,
+                TextColor3 = SelectedTheme.TextColor,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = ButtonContainer
+            })
+            
+            local ButtonInteract = Utility.createInstance("TextButton", {
+                Name = "Interact",
+                Size = UDim2.new(1, 0, 1, 0),
+                BackgroundTransparency = 1,
+                Text = "",
+                Parent = ButtonContainer
+            })
+            
+            -- Add hover and click effects
+            ButtonInteract.MouseEnter:Connect(function()
+                TweenService:Create(ButtonContainer, TweenInfo.new(0.2), {
+                    BackgroundColor3 = SelectedTheme.ElementBackgroundHover
+                }):Play()
+            end)
+            
+            ButtonInteract.MouseLeave:Connect(function()
+                TweenService:Create(ButtonContainer, TweenInfo.new(0.2), {
+                    BackgroundColor3 = SelectedTheme.ElementBackground
+                }):Play()
+            end)
+            
+            ButtonInteract.MouseButton1Down:Connect(function()
+                TweenService:Create(ButtonContainer, TweenInfo.new(0.1), {
+                    BackgroundColor3 = Utility.darker(SelectedTheme.ElementBackgroundHover, 0.1)
+                }):Play()
+            end)
+            
+            ButtonInteract.MouseButton1Up:Connect(function()
+                TweenService:Create(ButtonContainer, TweenInfo.new(0.1), {
+                    BackgroundColor3 = SelectedTheme.ElementBackgroundHover
+                }):Play()
+            end)
+            
+            ButtonInteract.MouseButton1Click:Connect(options.Callback)
+            
+            -- Add tooltip if provided
+            if options.Tooltip then
+                ButtonInteract.MouseEnter:Connect(function()
+                    Utility.showTooltip(options.Tooltip, ButtonContainer)
+                end)
+                
+                ButtonInteract.MouseLeave:Connect(function()
+                    Utility.hideTooltip()
+                end)
+            end
+            
+            return ButtonContainer
+        end
+
+        function Tab:CreateToggle(options)
+            options = options or {}
+            options.Name = options.Name or "Toggle"
+            options.CurrentValue = options.CurrentValue or false
+            options.Flag = options.Flag or ""
+            options.Callback = options.Callback or function() end
+            options.Icon = options.Icon or 0
+            options.Tooltip = options.Tooltip or nil
+            
+            local ToggleContainer = Utility.createInstance("Frame", {
+                Name = "Toggle_" .. options.Name,
+                Size = UDim2.new(1, 0, 0, 36),
+                BackgroundColor3 = SelectedTheme.ElementBackground,
+                Parent = TabPage
+            })
+            
+            Utility.createCorner(ToggleContainer, 4)
+            
+            -- Add icon if provided
+            local iconPadding = 0
+            if options.Icon ~= 0 then
+                local ToggleIcon = Utility.createInstance("ImageLabel", {
+                    Name = "Icon",
+                    Size = UDim2.new(0, 20, 0, 20),
+                    Position = UDim2.new(0, 8, 0.5, 0),
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    BackgroundTransparency = 1,
+                    Image = Utility.loadIcon(options.Icon),
+                    ImageColor3 = SelectedTheme.TextColor,
+                    Parent = ToggleContainer
+                })
+                iconPadding = 30
+            end
+            
+            local ToggleTitle = Utility.createInstance("TextLabel", {
+                Name = "Title",
+                Size = UDim2.new(1, -(60 + iconPadding), 1, 0),
+                Position = UDim2.new(0, 10 + iconPadding, 0, 0),
+                BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham,
+                Text = options.Name,
+                TextColor3 = SelectedTheme.TextColor,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = ToggleContainer
+            })
+            
+            local ToggleFrame = Utility.createInstance("Frame", {
+                Name = "Toggle",
+                Size = UDim2.new(0, 36, 0, 18),
+                Position = UDim2.new(1, -46, 0.5, 0),
+                AnchorPoint = Vector2.new(0, 0.5),
+                BackgroundColor3 = options.CurrentValue and SelectedTheme.ToggleEnabled or SelectedTheme.ToggleDisabled,
+                Parent = ToggleContainer
+            })
+            
+            Utility.createCorner(ToggleFrame, 10)
+            
+            local ToggleBall = Utility.createInstance("Frame", {
+                Name = "Ball",
+                Size = UDim2.new(0, 14, 0, 14),
+                Position = UDim2.new(0, options.CurrentValue and 20 or 2, 0, 2),
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+                Parent = ToggleFrame
+            })
+            
+            Utility.createCorner(ToggleBall, 10)
+            
+            local ToggleInteract = Utility.createInstance("TextButton", {
+                Name = "Interact",
+                Size = UDim2.new(1, 0, 1, 0),
+                BackgroundTransparency = 1,
+                Text = "",
+                Parent = ToggleContainer
+            })
+            
+            -- Handle toggle state
+            local toggled = options.CurrentValue
+            
+            -- Store value in flags
+            if options.Flag ~= "" then
+                LuminaUI.Flags[options.Flag] = {
+                    Type = "Toggle",
+                    Value = toggled
+                }
+            end
+            
+            ToggleInteract.MouseButton1Click:Connect(function()
+                toggled = not toggled
+                
+                -- Update UI
+                TweenService:Create(ToggleFrame, TweenInfo.new(0.3), {
+                    BackgroundColor3 = toggled and SelectedTheme.ToggleEnabled or SelectedTheme.ToggleDisabled
+                }):Play()
+                
+                TweenService:Create(ToggleBall, TweenInfo.new(0.3), {
+                    Position = UDim2.new(0, toggled and 20 or 2, 0, 2)
+                }):Play()
+                
+                -- Update flags
+                if options.Flag ~= "" then
+                    LuminaUI.Flags[options.Flag].Value = toggled
+                end
+                
+                -- Execute callback
+                options.Callback(toggled)
+            end)
+            
+            -- Add hover effects
+            ToggleInteract.MouseEnter:Connect(function()
+                TweenService:Create(ToggleContainer, TweenInfo.new(0.2), {
+                    BackgroundColor3 = SelectedTheme.ElementBackgroundHover
+                }):Play()
+                
+                if options.Tooltip then
+                    Utility.showTooltip(options.Tooltip, ToggleContainer)
+                end
+            end)
+            
+            ToggleInteract.MouseLeave:Connect(function()
+                TweenService:Create(ToggleContainer, TweenInfo.new(0.2), {
+                    BackgroundColor3 = SelectedTheme.ElementBackground
+                }):Play()
+                
+                if options.Tooltip then
+                    Utility.hideTooltip()
+                end
+            end)
+            
+            -- Return object with methods
+            local ToggleObject = {
+                Instance = ToggleContainer,
+                Value = toggled,
+                
+                SetValue = function(self, value)
+                    toggled = value
+                    
+                    -- Update UI without animation
+                    ToggleFrame.BackgroundColor3 = toggled and SelectedTheme.ToggleEnabled or SelectedTheme.ToggleDisabled
+                    ToggleBall.Position = UDim2.new(0, toggled and 20 or 2, 0, 2)
+                    
+                    -- Update flags
+                    if options.Flag ~= "" then
+                        LuminaUI.Flags[options.Flag].Value = toggled
+                    end
+                end,
+                
+                SetVisible = function(self, visible)
+                    ToggleContainer.Visible = visible
+                    
+                    -- Update layout if applicable
+                    if TabPage.Parent and TabPage.Parent:FindFirstChild("UIListLayout") then
+                        TabPage.Parent.UIListLayout:ApplyLayout()
+                    end
+                end
+            }
+            
+            return ToggleObject
+        end
+
+        function Tab:CreateSlider(options)
+            options = options or {}
+            options.Name = options.Name or "Slider"
+            options.Range = options.Range or {0, 100}
+            options.Increment = options.Increment or 1
+            options.Suffix = options.Suffix or ""
+            options.CurrentValue = options.CurrentValue or 50
+            options.Flag = options.Flag or ""
+            options.Callback = options.Callback or function() end
+            options.Icon = options.Icon or 0
+            options.Tooltip = options.Tooltip or nil
+            
+            -- Validate current value is in range
+            options.CurrentValue = math.clamp(options.CurrentValue, options.Range[1], options.Range[2])
+            
+            local SliderContainer = Utility.createInstance("Frame", {
+                Name = "Slider_" .. options.Name,
+                Size = UDim2.new(1, 0, 0, 50),
+                BackgroundColor3 = SelectedTheme.ElementBackground,
+                Parent = TabPage
+            })
+            
+            Utility.createCorner(SliderContainer, 4)
+            
+            -- Add icon if provided
+            local iconPadding = 0
+            if options.Icon ~= 0 then
+                local SliderIcon = Utility.createInstance("ImageLabel", {
+                    Name = "Icon",
+                    Size = UDim2.new(0, 20, 0, 20),
+                    Position = UDim2.new(0, 8, 0, 8),
+                    BackgroundTransparency = 1,
+                    Image = Utility.loadIcon(options.Icon),
+                    ImageColor3 = SelectedTheme.TextColor,
+                    Parent = SliderContainer
+                })
+                iconPadding = 30
+            end
+            
+            local SliderTitle = Utility.createInstance("TextLabel", {
+                Name = "Title",
+                Size = UDim2.new(1, -(10 + iconPadding + 60), 0, 20),
+                Position = UDim2.new(0, 10 + iconPadding, 0, 6),
+                BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham,
+                Text = options.Name,
+                TextColor3 = SelectedTheme.TextColor,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = SliderContainer
+            })
+            
+            local ValueDisplay = Utility.createInstance("TextLabel", {
+                Name = "Value",
+                Size = UDim2.new(0, 50, 0, 20),
+                Position = UDim2.new(1, -60, 0, 6),
+                BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham,
+                Text = tostring(options.CurrentValue) .. options.Suffix,
+                TextColor3 = SelectedTheme.SubTextColor,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = SliderContainer
+            })
+            
+            local SliderBackground = Utility.createInstance("Frame", {
+                Name = "Background",
+                Size = UDim2.new(1, -20, 0, 8),
+                Position = UDim2.new(0, 10, 0, 32),
+                BackgroundColor3 = Utility.darker(SelectedTheme.SliderBackground, 0.3),
+                Parent = SliderContainer
+            })
+            
+            Utility.createCorner(SliderBackground, 4)
+            
+            -- Calculate initial fill percentage
+            local min, max = options.Range[1], options.Range[2]
+            local initialPercent = (options.CurrentValue - min) / (max - min)
+            
+            local SliderFill = Utility.createInstance("Frame", {
+                Name = "Fill",
+                Size = UDim2.new(initialPercent, 0, 1, 0),
+                BackgroundColor3 = SelectedTheme.SliderProgress,
+                Parent = SliderBackground
+            })
+            
+            Utility.createCorner(SliderFill, 4)
+            
+            local SliderInteract = Utility.createInstance("TextButton", {
+                Name = "Interact",
+                Size = UDim2.new(1, 0, 1, 0),
+                BackgroundTransparency = 1,
+                Text = "",
+                Parent = SliderBackground
+            })
+            
+            -- Store current value
+            local currentValue = options.CurrentValue
+            
+            -- Store value in flags
+            if options.Flag ~= "" then
+                LuminaUI.Flags[options.Flag] = {
+                    Type = "Slider",
+                    Value = currentValue
+                }
+            end
+            
+            local function updateSlider(input)
+                local sizeX = math.clamp((input.Position.X - SliderBackground.AbsolutePosition.X) / SliderBackground.AbsoluteSize.X, 0, 1)
+                
+                -- Calculate value based on size percentage
+                local rawValue = min + ((max - min) * sizeX)
+                
+                -- Round to increment
+                local value = min + (math.floor((rawValue - min) / options.Increment + 0.5) * options.Increment)
+                
+                -- Clamp value
+                value = math.clamp(value, min, max)
+                
+                -- Update UI
+                SliderFill.Size = UDim2.new(sizeX, 0, 1, 0)
+                ValueDisplay.Text = tostring(value) .. options.Suffix
+                
+                -- Update stored value
+                currentValue = value
+                
+                -- Update flags
+                if options.Flag ~= "" then
+                    LuminaUI.Flags[options.Flag].Value = value
+                end
+                
+                -- Execute callback
+                options.Callback(value)
+                
+                return value
+            end
+            
+            SliderInteract.MouseButton1Down:Connect(function()
+                local value = updateSlider({Position = UserInputService:GetMouseLocation()})
+                
+                local moveConnection
+                moveConnection = UserInputService.InputChanged:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseMovement then
+                        value = updateSlider({Position = UserInputService:GetMouseLocation()})
+                    end
+                end)
+                
+                UserInputService.InputEnded:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        if moveConnection then
+                            moveConnection:Disconnect()
+                        end
+                    end
+                end)
+            end)
+            
+            -- Add hover effects
+            SliderContainer.MouseEnter:Connect(function()
+                TweenService:Create(SliderContainer, TweenInfo.new(0.2), {
+                    BackgroundColor3 = SelectedTheme.ElementBackgroundHover
+                }):Play()
+                
+                if options.Tooltip then
+                    Utility.showTooltip(options.Tooltip, SliderContainer)
+                end
+            end)
+            
+            SliderContainer.MouseLeave:Connect(function()
+                TweenService:Create(SliderContainer, TweenInfo.new(0.2), {
+                    BackgroundColor3 = SelectedTheme.ElementBackground
+                }):Play()
+                
+                if options.Tooltip then
+                    Utility.hideTooltip()
+                end
+            end)
+            
+            -- Return object with methods
+            local SliderObject = {
+                Instance = SliderContainer,
+                Value = currentValue,
+                
+                SetValue = function(self, value)
+                    value = math.clamp(value, min, max)
+                    currentValue = value
+                    
+                    -- Calculate fill percentage
+                    local sizeX = (value - min) / (max - min)
+                    
+                    -- Update UI without animation
+                    SliderFill.Size = UDim2.new(sizeX, 0, 1, 0)
+                    ValueDisplay.Text = tostring(value) .. options.Suffix
+                    
+                    -- Update flags
+                    if options.Flag ~= "" then
+                        LuminaUI.Flags[options.Flag].Value = value
+                    end
+                end
+            }
+            
+            return SliderObject
+        end
+
+        function Tab:CreateDropdown(options)
+            options = options or {}
+            options.Name = options.Name or "Dropdown"
+            options.Options = options.Options or {}
+            options.CurrentOption = options.CurrentOption or ""
+            options.Flag = options.Flag or ""
+            options.Callback = options.Callback or function() end
+            options.Icon = options.Icon or 0
+            options.Tooltip = options.Tooltip or nil
+            
+            -- Find the default option
+            if options.CurrentOption == "" and #options.Options > 0 then
+                options.CurrentOption = options.Options[1]
+            end
+            
+            local DropdownContainer = Utility.createInstance("Frame", {
+                Name = "Dropdown_" .. options.Name,
+                Size = UDim2.new(1, 0, 0, 36),
+                BackgroundColor3 = SelectedTheme.ElementBackground,
+                ClipsDescendants = true,
+                Parent = TabPage
+            })
+            
+            Utility.createCorner(DropdownContainer, 4)
+            
+            -- Add icon if provided
+            local iconPadding = 0
+            if options.Icon ~= 0 then
+                local DropdownIcon = Utility.createInstance("ImageLabel", {
+                    Name = "Icon",
+                    Size = UDim2.new(0, 20, 0, 20),
+                    Position = UDim2.new(0, 8, 0, 8),
+                    BackgroundTransparency = 1,
+                    Image = Utility.loadIcon(options.Icon),
+                    ImageColor3 = SelectedTheme.TextColor,
+                    Parent = DropdownContainer
+                })
+                iconPadding = 30
+            end
+            
+            local DropdownTitle = Utility.createInstance("TextLabel", {
+                Name = "Title",
+                Size = UDim2.new(1, -(70 + iconPadding), 0, 36),
+                Position = UDim2.new(0, 10 + iconPadding, 0, 0),
+                BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham,
+                Text = options.Name,
+                TextColor3 = SelectedTheme.TextColor,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = DropdownContainer
+            })
+            
+            local SelectedOption = Utility.createInstance("TextLabel", {
+                Name = "Selected",
+                Size = UDim2.new(0, 120, 0, 36),
+                Position = UDim2.new(1, -130, 0, 0),
+                BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham,
+                Text = options.CurrentOption,
+                TextColor3 = SelectedTheme.SubTextColor,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = DropdownContainer
+            })
+            
+            local DropdownArrow = Utility.createInstance("ImageLabel", {
+                Name = "Arrow",
+                Size = UDim2.new(0, 16, 0, 16),
+                Position = UDim2.new(1, -24, 0, 10),
+                BackgroundTransparency = 1,
+                Image = "rbxassetid://10483855823", -- Dropdown arrow icon
+                ImageColor3 = SelectedTheme.SubTextColor,
+                Parent = DropdownContainer
+            })
+            
+            local DropdownInteract = Utility.createInstance("TextButton", {
+                Name = "Interact",
+                Size = UDim2.new(1, 0, 0, 36),
+                BackgroundTransparency = 1,
+                Text = "",
+                Parent = DropdownContainer
+            })
+            
+            -- Create dropdown items frame
+            local ListContainer = Utility.createInstance("Frame", {
+                Name = "List",
+                Size = UDim2.new(1, -10, 0, 0), -- Will be resized when tabs are added
+                Position = UDim2.new(0, 5, 0, 40),
+                BackgroundColor3 = Utility.darker(SelectedTheme.ElementBackground, 0.1),
+                Visible = false,
+                Parent = DropdownContainer
+            })
+            
+            Utility.createCorner(ListContainer, 4)
+            
+            local ListLayout = Utility.createInstance("UIListLayout", {
+                Padding = UDim.new(0, 4),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Parent = ListContainer
+            })
+            
+            local ListPadding = Utility.createInstance("UIPadding", {
+                PaddingLeft = UDim.new(0, 5),
+                PaddingRight = UDim.new(0, 5),
+                PaddingTop = UDim.new(0, 5),
+                PaddingBottom = UDim.new(0, 5),
+                Parent = ListContainer
+            })
+            
+            -- Store current selection
+            local currentOption = options.CurrentOption
+            local isOpen = false
+            
+            -- Store value in flags
+            if options.Flag ~= "" then
+                LuminaUI.Flags[options.Flag] = {
+                    Type = "Dropdown",
+                    Value = currentOption
+                }
+            end
+            
+            -- Create dropdown items
+            local function createDropdownItems()
+                -- Clear existing items
+                for _, child in ipairs(ListContainer:GetChildren()) do
+                    if child:IsA("Frame") then
+                        child:Destroy()
+                    end
+                end
+                
+                -- Create new items
+                for i, option in ipairs(options.Options) do
+                    local ItemFrame = Utility.createInstance("Frame", {
+                        Name = "Item_" .. i,
+                        Size = UDim2.new(1, 0, 0, 28),
+                        BackgroundColor3 = option == currentOption and SelectedTheme.DropdownSelected or SelectedTheme.DropdownUnselected,
+                        Parent = ListContainer
+                    })
+                    
+                    Utility.createCorner(ItemFrame, 4)
+                    
+                    local ItemLabel = Utility.createInstance("TextLabel", {
+                        Name = "Label",
+                        Size = UDim2.new(1, 0, 1, 0),
+                        BackgroundTransparency = 1,
+                        Font = Enum.Font.Gotham,
+                        Text = option,
+                        TextColor3 = option == currentOption and SelectedTheme.TextColor or SelectedTheme.SubTextColor,
+                        TextSize = 12,
+                        Parent = ItemFrame
+                    })
+                    
+                    local ItemButton = Utility.createInstance("TextButton", {
+                        Name = "Interact",
+                        Size = UDim2.new(1, 0, 1, 0),
+                        BackgroundTransparency = 1,
+                        Text = "",
+                        Parent = ItemFrame
+                    })
+                    
+                    -- Handle item selection
+                    ItemButton.MouseEnter:Connect(function()
+                        if option ~= currentOption then
+                            TweenService:Create(ItemFrame, TweenInfo.new(0.2), {
+                                BackgroundColor3 = Utility.lighter(SelectedTheme.DropdownUnselected, 0.1)
+                            }):Play()
+                        end
+                    end)
+                    
+                    ItemButton.MouseLeave:Connect(function()
+                        if option ~= currentOption then
+                            TweenService:Create(ItemFrame, TweenInfo.new(0.2), {
+                                BackgroundColor3 = SelectedTheme.DropdownUnselected
+                            }):Play()
+                        end
+                    end)
+                    
+                    ItemButton.MouseButton1Click:Connect(function()
+                        currentOption = option
+                        SelectedOption.Text = option
+                        
+                        -- Update UI
+                        createDropdownItems()
+                        
+                        -- Close dropdown
+                        toggleDropdown(false)
+                        
+                        -- Update flags
+                        if options.Flag ~= "" then
+                            LuminaUI.Flags[options.Flag].Value = option
+                        end
+                        
+                        -- Execute callback
+                        options.Callback(option)
+                    end)
+                end
+                
+                -- Update size based on content
+                ListContainer.Size = UDim2.new(1, -10, 0, #options.Options * 32 + 10)
+                
+                -- Adjust parent container when open
+                if isOpen then
+                    DropdownContainer.Size = UDim2.new(1, 0, 0, 46 + ListContainer.Size.Y.Offset)
+                else
+                    DropdownContainer.Size = UDim2.new(1, 0, 0, 36)
+                end
+            end
+            
+            -- Toggle dropdown state
+            local function toggleDropdown(state)
+                isOpen = state
+                
+                -- Show/hide list
+                ListContainer.Visible = isOpen
+                
+                -- Adjust container size
+                if isOpen then
+                    DropdownContainer.Size = UDim2.new(1, 0, 0, 46 + ListContainer.Size.Y.Offset)
+                    TweenService:Create(DropdownArrow, TweenInfo.new(0.3), {
+                        Rotation = 180
+                    }):Play()
+                else
+                    DropdownContainer.Size = UDim2.new(1, 0, 0, 36)
+                    TweenService:Create(DropdownArrow, TweenInfo.new(0.3), {
+                        Rotation = 0
+                    }):Play()
+                end
+            end
+            
+            -- Toggle dropdown when clicked
+            DropdownInteract.MouseButton1Click:Connect(function()
+                toggleDropdown(not isOpen)
+            end)
+            
+            -- Close dropdown when clicking elsewhere
+            UserInputService.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 and isOpen then
+                    local mousePos = UserInputService:GetMouseLocation()
+                    local dropdownPosition = DropdownContainer.AbsolutePosition
+                    local dropdownSize = DropdownContainer.AbsoluteSize
+                    
+                    if mousePos.X < dropdownPosition.X or 
+                       mousePos.X > dropdownPosition.X + dropdownSize.X or 
+                       mousePos.Y < dropdownPosition.Y or 
+                       mousePos.Y > dropdownPosition.Y + dropdownSize.Y then
+                        toggleDropdown(false)
+                    end
+                end
+            end)
+            
+            -- Add hover effects
+            DropdownInteract.MouseEnter:Connect(function()
+                TweenService:Create(DropdownContainer, TweenInfo.new(0.2), {
+                    BackgroundColor3 = SelectedTheme.ElementBackgroundHover
+                }):Play()
+                
+                if options.Tooltip then
+                    Utility.showTooltip(options.Tooltip, DropdownContainer)
+                end
+            end)
+            
+            DropdownInteract.MouseLeave:Connect(function()
+                TweenService:Create(DropdownContainer, TweenInfo.new(0.2), {
+                    BackgroundColor3 = SelectedTheme.ElementBackground
+                }):Play()
+                
+                if options.Tooltip then
+                    Utility.hideTooltip()
+                end
+            end)
+            
+            -- Initial setup
+            createDropdownItems()
+            
+            -- Return object with methods
+            local DropdownObject = {
+                Instance = DropdownContainer,
+                Value = currentOption,
+                
+                SetValue = function(self, option)
+                    if table.find(options.Options, option) then
+                        currentOption = option
+                        SelectedOption.Text = option
+                        
+                        -- Update UI without animation
+                        createDropdownItems()
+                        
+                        -- Update flags
+                        if options.Flag ~= "" then
+                            LuminaUI.Flags[options.Flag].Value = option
+                        end
+                    end
+                end,
+                
+                Refresh = function(self, newOptions, newValue)
+                    options.Options = newOptions or options.Options
+                    
+                    if newValue and table.find(options.Options, newValue) then
+                        currentOption = newValue
+                        SelectedOption.Text = newValue
+                        
+                        -- Update flags
+                        if options.Flag ~= "" then
+                            LuminaUI.Flags[options.Flag].Value = newValue
+                        end
+                    elseif not table.find(options.Options, currentOption) and #options.Options > 0 then
+                        currentOption = options.Options[1]
+                        SelectedOption.Text = currentOption
+                        
+                        -- Update flags
+                        if options.Flag ~= "" then
+                            LuminaUI.Flags[options.Flag].Value = currentOption
+                        end
+                    end
+                    
+                    -- Update dropdown items
+                    createDropdownItems()
+                    
+                    -- Close dropdown
+                    toggleDropdown(false)
+                end
+            }
+            
+            return DropdownObject
+        end
+
         return Tab
+    end
+
+    function Window:CreateTabGroup(groupName)
+        local TabGroup = {
+            Name = groupName,
+            Tabs = {},
+            Visible = true
+        }
+        
+        local GroupContainer = Utility.createInstance("Frame", {
+            Name = "Group_" .. groupName,
+            Size = UDim2.new(1, -10, 0, 34),
+            BackgroundTransparency = 1,
+            Parent = TabScrollFrame
+        })
+        
+        local GroupHeader = Utility.createInstance("Frame", {
+            Name = "Header",
+            Size = UDim2.new(1, 0, 0, 30),
+            BackgroundColor3 = SelectedTheme.ElementBackground,
+            Parent = GroupContainer
+        })
+        
+        Utility.createCorner(GroupHeader, 6)
+        
+        local GroupTitle = Utility.createInstance("TextLabel", {
+            Name = "Title",
+            Size = UDim2.new(1, -30, 1, 0),
+            Position = UDim2.new(0, 10, 0, 0),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            Text = groupName,
+            TextColor3 = SelectedTheme.TextColor,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = GroupHeader
+        })
+        
+        local GroupArrow = Utility.createInstance("ImageLabel", {
+            Name = "Arrow",
+            Size = UDim2.new(0, 16, 0, 16),
+            Position = UDim2.new(1, -20, 0.5, 0),
+            AnchorPoint = Vector2.new(0, 0.5),
+            BackgroundTransparency = 1,
+            Image = "rbxassetid://10483855823", -- Arrow icon
+            ImageColor3 = SelectedTheme.TextColor,
+            Rotation = 0, -- 0 for open, 180 for closed
+            Parent = GroupHeader
+        })
+        
+        local GroupInteract = Utility.createInstance("TextButton", {
+            Name = "Interact",
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Text = "",
+            Parent = GroupHeader
+        })
+        
+        local GroupContent = Utility.createInstance("Frame", {
+            Name = "Content",
+            Size = UDim2.new(1, 0, 0, 0), -- Will be resized when tabs are added
+            Position = UDim2.new(0, 0, 0, 34),
+            BackgroundTransparency = 1,
+            ClipsDescendants = true,
+            Parent = GroupContainer
+        })
+        
+        local ContentLayout = Utility.createInstance("UIListLayout", {
+            Padding = UDim.new(0, 5),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Parent = GroupContent
+        })
+        
+        -- Toggle group expanded/collapsed
+        local isExpanded = true
+        
+        GroupInteract.MouseButton1Click:Connect(function()
+            isExpanded = not isExpanded
+            
+            -- Update arrow rotation
+            TweenService:Create(GroupArrow, TweenInfo.new(0.3), {
+                Rotation = isExpanded and 0 or 180
+            }):Play()
+            
+            -- Update content visibility
+            if isExpanded then
+                TweenService:Create(GroupContent, TweenInfo.new(0.3), {
+                    Size = UDim2.new(1, 0, 0, ContentLayout.AbsoluteContentSize.Y)
+                }):Play()
+                
+                TweenService:Create(GroupContainer, TweenInfo.new(0.3), {
+                    Size = UDim2.new(1, -10, 0, 34 + ContentLayout.AbsoluteContentSize.Y)
+                }):Play()
+            else
+                TweenService:Create(GroupContent, TweenInfo.new(0.3), {
+                    Size = UDim2.new(1, 0, 0, 0)
+                }):Play()
+                
+                TweenService:Create(GroupContainer, TweenInfo.new(0.3), {
+                    Size = UDim2.new(1, -10, 0, 34)
+                }):Play()
+            end
+            
+            TabGroup.Visible = isExpanded
+        end)
+        
+        -- Update content size when tabs are added
+        ContentLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+            if isExpanded then
+                GroupContent.Size = UDim2.new(1, 0, 0, ContentLayout.AbsoluteContentSize.Y)
+                GroupContainer.Size = UDim2.new(1, -10, 0, 34 + ContentLayout.AbsoluteContentSize.Y)
+            end
+        end)
+        
+        -- Tab creation function for this group
+        function TabGroup:CreateTab(tabName, icon)
+            local newTab = Window:CreateTab(tabName, icon)
+            
+            -- Move tab to group content
+            if newTab.Instance and newTab.Instance:IsA("Frame") then
+                newTab.Instance.Parent = GroupContent
+            end
+            
+            table.insert(self.Tabs, newTab)
+            return newTab
+        end
+        
+        return TabGroup
     end
     
     return Window
