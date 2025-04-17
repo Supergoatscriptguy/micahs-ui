@@ -686,6 +686,12 @@ end
 -- Enhanced Tab Selection Animation
 -- Add this inside the tab selection handler
 function enhancedTabSelection(tab, page)
+    -- First, make sure the settings page is hidden when any other tab is selected
+    local settingsPage = ElementsPageFolder:FindFirstChild("Settings")
+    if settingsPage and page ~= settingsPage then
+        settingsPage.Visible = false
+    end
+    
     for _, otherTab in pairs(TabScrollFrame:GetChildren()) do
         if otherTab:IsA("Frame") and otherTab ~= tab then
             TweenService:Create(otherTab, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
@@ -1309,10 +1315,50 @@ function LuminaUI:CreateWindow(settings)
     local settingsOpen = false
     SettingsButton.MouseButton1Click:Connect(function()
         settingsOpen = not settingsOpen
-        
-        for _, page in ipairs(ElementsPageFolder:GetChildren()) do
-            if page:IsA("ScrollingFrame") then
-                page.Visible = page.Name == "Settings" and settingsOpen or (not settingsOpen and page.Visible)
+    
+        -- If we're opening settings, hide all other pages
+        if settingsOpen then
+            for _, page in ipairs(ElementsPageFolder:GetChildren()) do
+                if page:IsA("ScrollingFrame") then
+                    page.Visible = page.Name == "Settings"
+                end
+            end
+            
+            -- Visually deselect all tabs
+            for _, tab in ipairs(TabScrollFrame:GetChildren()) do
+                if tab:IsA("Frame") then
+                    TweenService:Create(tab, TweenInfo.new(0.3), {
+                        BackgroundColor3 = SelectedTheme.TabBackground,
+                        BackgroundTransparency = 0.7
+                    }):Play()
+                    
+                    if tab:FindFirstChild("Title") then
+                        TweenService:Create(tab.Title, TweenInfo.new(0.3), {
+                            TextColor3 = SelectedTheme.TabTextColor,
+                            TextTransparency = 0.2
+                        }):Play()
+                    end
+                    
+                    if tab:FindFirstChild("Icon") then
+                        TweenService:Create(tab.Icon, TweenInfo.new(0.3), {
+                            ImageColor3 = SelectedTheme.TabTextColor,
+                            ImageTransparency = 0.2
+                        }):Play()
+                    end
+                end
+            end
+        else
+            -- If closing settings, find the first tab and select it
+            local firstTab
+            for _, tab in ipairs(TabScrollFrame:GetChildren()) do
+                if tab:IsA("Frame") and tab:FindFirstChild("Interact") then
+                    firstTab = tab
+                    break
+                end
+            end
+            
+            if firstTab and firstTab:FindFirstChild("Interact") then
+                firstTab.Interact.MouseButton1Click:Fire()
             end
         end
     end)
@@ -2333,8 +2379,15 @@ function LuminaUI:CreateWindow(settings)
                         -- Execute callback
                         options.Callback(option)
                         
-                        -- Close dropdown after selection
+                        -- Close dropdown immediately after selection to prevent UI issues
                         toggleDropdown(false)
+                        
+                        -- Wait a frame before recalculating canvas size
+                        task.defer(function()
+                            if TabPage and TabPage:FindFirstChild("UIListLayout") then
+                                TabPage.CanvasSize = UDim2.new(0, 0, 0, TabPage.UIListLayout.AbsoluteContentSize.Y + 16)
+                            end
+                        end)
                     end)
                 end
                 
@@ -2358,14 +2411,23 @@ function LuminaUI:CreateWindow(settings)
                 
                 -- Adjust container size with animation for better UX
                 if isOpen then
+                    -- Calculate proper size for expanded dropdown
+                    local targetSize = UDim2.new(1, 0, 0, 46 + ListContainer.Size.Y.Offset)
+                    
+                    -- Set appropriate ClipsDescendants
+                    DropdownContainer.ClipsDescendants = false
+                    
                     TweenService:Create(DropdownContainer, TweenInfo.new(0.3), {
-                        Size = UDim2.new(1, 0, 0, 46 + ListContainer.Size.Y.Offset)
+                        Size = targetSize
                     }):Play()
                     
                     TweenService:Create(DropdownArrow, TweenInfo.new(0.3), {
                         Rotation = 180
                     }):Play()
                 else
+                    -- Before collapsing, make sure content will be clipped
+                    DropdownContainer.ClipsDescendants = true
+                    
                     TweenService:Create(DropdownContainer, TweenInfo.new(0.3), {
                         Size = UDim2.new(1, 0, 0, 36)
                     }):Play()
@@ -2374,6 +2436,13 @@ function LuminaUI:CreateWindow(settings)
                         Rotation = 0
                     }):Play()
                 end
+                
+                -- Recalculate canvas size - crucial for fixing the UI after dropdown usage
+                task.delay(0.35, function()
+                    if TabPage and TabPage:FindFirstChild("UIListLayout") then
+                        TabPage.CanvasSize = UDim2.new(0, 0, 0, TabPage.UIListLayout.AbsoluteContentSize.Y + 16)
+                    end
+                end)
             end
             
             -- Toggle dropdown when clicked
