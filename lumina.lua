@@ -686,8 +686,7 @@ end
 -- Enhanced Tab Selection Animation
 -- Add this inside the tab selection handler
 function enhancedTabSelection(tab, page)
-    -- First animate all tabs to deselected state
-    for _, otherTab in ipairs(TabScrollFrame:GetChildren()) do
+    for _, otherTab in pairs(TabScrollFrame:GetChildren()) do
         if otherTab:IsA("Frame") and otherTab ~= tab then
             TweenService:Create(otherTab, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
                 BackgroundColor3 = SelectedTheme.TabBackground,
@@ -710,21 +709,12 @@ function enhancedTabSelection(tab, page)
         end
     end
     
-    -- Animate all pages to hidden
-    for _, otherPage in ipairs(ElementsPageFolder:GetChildren()) do
+    for _, otherPage in pairs(ElementsPageFolder:GetChildren()) do
         if otherPage:IsA("ScrollingFrame") and otherPage ~= page then
-            TweenService:Create(otherPage, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
-                Position = UDim2.new(0, 20, 0, 0),
-                BackgroundTransparency = 1
-            }):Play()
-            
-            task.delay(0.2, function()
-                otherPage.Visible = false
-            end)
+            otherPage.Visible = false
         end
     end
     
-    -- Select the active tab with animation
     TweenService:Create(tab, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
         BackgroundColor3 = SelectedTheme.TabBackgroundSelected,
         BackgroundTransparency = 0
@@ -746,15 +736,7 @@ function enhancedTabSelection(tab, page)
         Utility.pulseEffect(tab.Icon)
     end
     
-    -- Show and animate the selected page
-    page.Position = UDim2.new(0, -20, 0, 0)
-    page.BackgroundTransparency = 1
     page.Visible = true
-    
-    TweenService:Create(page, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
-        Position = UDim2.new(0, 0, 0, 0),
-        BackgroundTransparency = 0
-    }):Play()
 end
 
 -- UI Creation Functions
@@ -994,18 +976,18 @@ function LuminaUI:CreateWindow(settings)
     end
     
     -- Control buttons
--- Fix for Close Button - modify this in the code where CloseButton is created
-local CloseButton = Utility.createInstance("ImageButton", {
-    Name = "Close",
-    Size = UDim2.new(0, 18, 0, 18),
-    Position = UDim2.new(1, -15, 0.5, 0),
-    AnchorPoint = Vector2.new(1, 0.5),
-    BackgroundTransparency = 1,
-    Image = "rbxassetid://10734953387",
-    ImageColor3 = SelectedTheme.TextColor,
-    ImageTransparency = 0, -- Changed from 0.2 to 0 to make it visible
-    Parent = Topbar
-})    
+    local CloseButton = Utility.createInstance("ImageButton", {
+        Name = "Close",
+        Size = UDim2.new(0, 18, 0, 18),
+        Position = UDim2.new(1, -15, 0.5, 0),
+        AnchorPoint = Vector2.new(1, 0.5),
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://10734953387",
+        ImageColor3 = SelectedTheme.TextColor,
+        ImageTransparency = 0,
+        Parent = Topbar
+    })
+    
     local MinimizeButton = Utility.createInstance("ImageButton", {
         Name = "Minimize",
         Size = UDim2.new(0, 18, 0, 18),
@@ -1065,6 +1047,9 @@ local CloseButton = Utility.createInstance("ImageButton", {
     
     local TabPadding = Utility.createInstance("UIPadding", {
         PaddingTop = UDim.new(0, 5),
+        PaddingLeft = UDim.new(0, 5),
+        PaddingRight = UDim.new(0, 5),
+        PaddingBottom = UDim.new(0, 5),
         Parent = TabScrollFrame
     })
     
@@ -1238,6 +1223,54 @@ local CloseButton = Utility.createInstance("ImageButton", {
         Parent = Notifications
     })
     
+    -- Create credits section
+    local CreditsSection = Utility.createInstance("Frame", {
+        Name = "Credits",
+        Size = UDim2.new(1, 0, 0, 30),
+        Position = UDim2.new(0, 0, 1, -30),
+        BackgroundColor3 = Utility.darker(SelectedTheme.ElementBackground, 0.1),
+        Parent = MainFrame
+    })
+
+    local CreditText = Utility.createInstance("TextLabel", {
+        Name = "CreditText",
+        Size = UDim2.new(0.7, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham,
+        Text = "LuminaUI by Supergoatscriptguy",
+        TextColor3 = SelectedTheme.SubTextColor,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Position = UDim2.new(0, 10, 0, 0),
+        Parent = CreditsSection
+    })
+
+    local DiscordButton = Utility.createInstance("TextButton", {
+        Name = "DiscordButton",
+        Size = UDim2.new(0, 100, 0, 22),
+        Position = UDim2.new(1, -110, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5),
+        BackgroundColor3 = Color3.fromRGB(88, 101, 242), -- Discord color
+        Font = Enum.Font.GothamBold,
+        Text = "Join Discord",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 12,
+        Parent = CreditsSection
+    })
+
+    Utility.createCorner(DiscordButton, 4)
+
+    DiscordButton.MouseButton1Click:Connect(function()
+        if setclipboard then
+            setclipboard("https://discord.gg/3BUEVx5677")
+            Window:CreateNotification({
+                Title = "Discord",
+                Content = "Discord invite link copied to clipboard!",
+                Duration = 3
+            })
+        end
+    end)
+
     -- Button functionality
     CloseButton.MouseButton1Click:Connect(function()
         -- Capture position before closing for config saving
@@ -1295,6 +1328,17 @@ local CloseButton = Utility.createInstance("ImageButton", {
         end)
     end
     
+    -- Auto select first tab if any
+    RunService.RenderStepped:Wait()  -- Wait one frame for UI to initialize
+    if #TabScrollFrame:GetChildren() > 0 then
+        for _, child in pairs(TabScrollFrame:GetChildren()) do
+            if child:IsA("Frame") and child:FindFirstChild("Interact") then
+                child.Interact.MouseButton1Click:Fire()
+                break
+            end
+        end
+    end
+
     -- Window API
     local Window = {}
     
@@ -1580,7 +1624,29 @@ local CloseButton = Utility.createInstance("ImageButton", {
         
         -- Handle tab selection
         TabInteract.MouseButton1Click:Connect(function()
-            enhancedTabSelection(TabButton, TabPage)
+            if TabPage then
+                for _, otherTab in pairs(TabScrollFrame:GetChildren()) do
+                    if otherTab:IsA("Frame") then
+                        local isSelected = otherTab == TabButton
+                        otherTab.BackgroundColor3 = isSelected and SelectedTheme.TabBackgroundSelected or SelectedTheme.TabBackground
+                        otherTab.BackgroundTransparency = isSelected and 0 or 0.7
+                        
+                        if otherTab:FindFirstChild("Title") then
+                            otherTab.Title.TextColor3 = isSelected and SelectedTheme.SelectedTabTextColor or SelectedTheme.TabTextColor
+                            otherTab.Title.TextTransparency = isSelected and 0 or 0.2
+                        end
+                        
+                        if otherTab:FindFirstChild("Icon") then
+                            otherTab.Icon.ImageColor3 = isSelected and SelectedTheme.SelectedTabTextColor or SelectedTheme.TabTextColor
+                            otherTab.Icon.ImageTransparency = isSelected and 0 or 0.2
+                        end
+                    end
+                end
+                
+                for _, page in pairs(ElementsPageFolder:GetChildren()) do
+                    page.Visible = page.Name == tabName
+                end
+            end
         end)
         
         -- Add Tab methods and return Tab object
@@ -2259,12 +2325,6 @@ local CloseButton = Utility.createInstance("ImageButton", {
                         currentOption = option
                         SelectedOption.Text = option
                         
-                        -- Update UI
-                        createDropdownItems()
-                        
-                        -- Close dropdown
-                        toggleDropdown(false)
-                        
                         -- Update flags
                         if options.Flag ~= "" then
                             LuminaUI.Flags[options.Flag].Value = option
@@ -2272,6 +2332,9 @@ local CloseButton = Utility.createInstance("ImageButton", {
                         
                         -- Execute callback
                         options.Callback(option)
+                        
+                        -- Close dropdown after selection
+                        toggleDropdown(false)
                     end)
                 end
                 
@@ -2293,14 +2356,20 @@ local CloseButton = Utility.createInstance("ImageButton", {
                 -- Show/hide list
                 ListContainer.Visible = isOpen
                 
-                -- Adjust container size
+                -- Adjust container size with animation for better UX
                 if isOpen then
-                    DropdownContainer.Size = UDim2.new(1, 0, 0, 46 + ListContainer.Size.Y.Offset)
+                    TweenService:Create(DropdownContainer, TweenInfo.new(0.3), {
+                        Size = UDim2.new(1, 0, 0, 46 + ListContainer.Size.Y.Offset)
+                    }):Play()
+                    
                     TweenService:Create(DropdownArrow, TweenInfo.new(0.3), {
                         Rotation = 180
                     }):Play()
                 else
-                    DropdownContainer.Size = UDim2.new(1, 0, 0, 36)
+                    TweenService:Create(DropdownContainer, TweenInfo.new(0.3), {
+                        Size = UDim2.new(1, 0, 0, 36)
+                    }):Play()
+                    
                     TweenService:Create(DropdownArrow, TweenInfo.new(0.3), {
                         Rotation = 0
                     }):Play()
