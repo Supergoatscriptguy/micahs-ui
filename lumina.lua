@@ -988,7 +988,7 @@ function LuminaUI:CreateWindow(settings)
         Position = UDim2.new(1, -15, 0.5, 0),
         AnchorPoint = Vector2.new(1, 0.5),
         BackgroundTransparency = 1,
-        Image = "rbxassetid://10734953387",
+        Image = "rbxassetid://9801455339", -- Using a more reliable X icon
         ImageColor3 = SelectedTheme.TextColor,
         ImageTransparency = 0,
         Parent = Topbar
@@ -1000,9 +1000,9 @@ function LuminaUI:CreateWindow(settings)
         Position = UDim2.new(1, -45, 0.5, 0),
         AnchorPoint = Vector2.new(1, 0.5),
         BackgroundTransparency = 1,
-        Image = "rbxassetid://10734950966",
+        Image = "rbxassetid://9801459758", -- Using a more reliable minimize icon
         ImageColor3 = SelectedTheme.TextColor,
-        ImageTransparency = 0.2,
+        ImageTransparency = 0,
         Parent = Topbar
     })
     
