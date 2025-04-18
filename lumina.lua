@@ -2726,5 +2726,141 @@ function LuminaUI:CreateWindow(settings)
     
     return Window
 end
+-- Add this function inside the LuminaUI library before the return statement at the end
+
+function LuminaUI:CreateLoadingScreen(callback)
+    -- Create loading screen container
+    local ScreenGui = Instance.new("ScreenGui")
+    local LoadingFrame = Instance.new("Frame")
+    local UICorner = Instance.new("UICorner")
+    local Title = Instance.new("TextLabel")
+    local Status = Instance.new("TextLabel")
+    local ProgressBar = Instance.new("Frame")
+    local UICornerBar = Instance.new("UICorner")
+    local ProgressFill = Instance.new("Frame")
+    local UICornerFill = Instance.new("UICorner")
+    
+    -- Configure loading screen
+    ScreenGui.Name = "LuminaLoadingScreen"
+    ScreenGui.DisplayOrder = 999
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    
+    -- Screen protection
+    if syn and syn.protect_gui then
+        syn.protect_gui(ScreenGui)
+        ScreenGui.Parent = game:GetService("CoreGui")
+    elseif gethui then
+        ScreenGui.Parent = gethui()
+    else
+        ScreenGui.Parent = game:GetService("CoreGui")
+    end
+    
+    LoadingFrame.Name = "LoadingFrame"
+    LoadingFrame.BackgroundColor3 = Color3.fromRGB(25, 35, 45)
+    LoadingFrame.Position = UDim2.new(0.5, -150, 0.5, -60)
+    LoadingFrame.Size = UDim2.new(0, 300, 0, 120)
+    LoadingFrame.Parent = ScreenGui
+    
+    UICorner.CornerRadius = UDim.new(0, 8)
+    UICorner.Parent = LoadingFrame
+    
+    Title.Name = "Title"
+    Title.BackgroundTransparency = 1
+    Title.Size = UDim2.new(1, 0, 0, 30)
+    Title.Position = UDim2.new(0, 0, 0, 15)
+    Title.Font = Enum.Font.GothamBold
+    Title.Text = "LuminaUI"
+    Title.TextColor3 = Color3.fromRGB(230, 240, 240)
+    Title.TextSize = 18
+    Title.Parent = LoadingFrame
+    
+    Status.Name = "Status"
+    Status.BackgroundTransparency = 1
+    Status.Size = UDim2.new(1, 0, 0, 20)
+    Status.Position = UDim2.new(0, 0, 0, 45)
+    Status.Font = Enum.Font.Gotham
+    Status.Text = "Loading..."
+    Status.TextColor3 = Color3.fromRGB(200, 210, 210)
+    Status.TextSize = 14
+    Status.Parent = LoadingFrame
+    
+    ProgressBar.Name = "ProgressBar"
+    ProgressBar.BackgroundColor3 = Color3.fromRGB(35, 45, 55)
+    ProgressBar.Position = UDim2.new(0.1, 0, 0, 80)
+    ProgressBar.Size = UDim2.new(0.8, 0, 0, 10)
+    ProgressBar.Parent = LoadingFrame
+    
+    UICornerBar.CornerRadius = UDim.new(0, 4)
+    UICornerBar.Parent = ProgressBar
+    
+    ProgressFill.Name = "Fill"
+    ProgressFill.BackgroundColor3 = Color3.fromRGB(0, 140, 180)
+    ProgressFill.Size = UDim2.new(0, 0, 1, 0)
+    ProgressFill.Parent = ProgressBar
+    
+    UICornerFill.CornerRadius = UDim.new(0, 4)
+    UICornerFill.Parent = ProgressFill
+    
+    -- API for updating the loading screen
+    local LoadingScreen = {}
+    
+    -- Update progress (0 to 1)
+    function LoadingScreen:UpdateProgress(progress, statusText)
+        ProgressFill:TweenSize(
+            UDim2.new(progress, 0, 1, 0), 
+            Enum.EasingDirection.Out,
+            Enum.EasingStyle.Quad,
+            0.2,
+            true
+        )
+        
+        if statusText then
+            Status.Text = statusText
+        end
+    end
+    
+    -- Remove the loading screen with animation
+    function LoadingScreen:Destroy()
+        -- Fade out animation
+        local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quad)
+        
+        local fadeTween = game:GetService("TweenService"):Create(LoadingFrame, tweenInfo, {
+            BackgroundTransparency = 1
+        })
+        
+        game:GetService("TweenService"):Create(Title, tweenInfo, {
+            TextTransparency = 1
+        }):Play()
+        
+        game:GetService("TweenService"):Create(Status, tweenInfo, {
+            TextTransparency = 1
+        }):Play()
+        
+        game:GetService("TweenService"):Create(ProgressBar, tweenInfo, {
+            BackgroundTransparency = 1
+        }):Play()
+        
+        game:GetService("TweenService"):Create(ProgressFill, tweenInfo, {
+            BackgroundTransparency = 1
+        }):Play()
+        
+        fadeTween:Play()
+        
+        -- Completely remove after fade animation
+        fadeTween.Completed:Connect(function()
+            ScreenGui:Destroy()
+        end)
+    end
+    
+    -- Execute callback if provided
+    if callback then
+        spawn(function()
+            callback(LoadingScreen)
+        end)
+    end
+    
+    return LoadingScreen
+end
 
 return LuminaUI
+-- End of LuminaUI library
