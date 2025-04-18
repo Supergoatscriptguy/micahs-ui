@@ -2726,6 +2726,7 @@ function LuminaUI:CreateWindow(settings)
     
     return Window
 end
+
 -- Add this function inside the LuminaUI library before the return statement at the end
 
 function LuminaUI:CreateLoadingScreen(callback)
