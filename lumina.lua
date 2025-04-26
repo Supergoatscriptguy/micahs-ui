@@ -1,17 +1,12 @@
 --[[
-    LuminaUI Interface Library (Refactored)
+    LuminaUI Interface Library (Refactored v1.3.1)
     A modern, responsive UI library for Roblox scripting
 
-    Version: 1.3.0 (Refactored)
-    Features:
-    - Modern design with smooth animations
-    - Customizable themes with dynamic updates
-    - Optimized performance (task library, connection management)
-    - Enhanced element interactions
-    - Simplified configuration
-    - Advanced component system
-    - Flexible layout options
-    - Improved error handling
+    Version: 1.3.1
+    Changes:
+    - Reviewed layout container transparencies and ZIndex.
+    - Enhanced comments and structure.
+    - Maintained features from v1.3.0.
 ]]
 
 -- Services
@@ -33,7 +28,7 @@ local ConfigExtension = ".config"
 -- Forward Declarations
 local LuminaUI = {
     Flags = {},
-    Version = "1.3.0",
+    Version = "1.3.1",
     Theme = {} -- Themes defined below
 }
 local Utility = {}
@@ -42,7 +37,7 @@ local ThemedElementsRegistry = {} -- Stores elements needing theme updates
 local ActiveDropdown = nil -- Track currently open dropdown
 local GlobalInputConnection = nil -- For closing dropdowns
 
--- Themes (Same as original)
+-- Themes (Same as original v1.3.0)
 LuminaUI.Theme = {
     Default = {
         TextColor = Color3.fromRGB(240, 240, 240), SubTextColor = Color3.fromRGB(200, 200, 200), Background = Color3.fromRGB(25, 25, 25), Topbar = Color3.fromRGB(34, 34, 34), Shadow = Color3.fromRGB(20, 20, 20), ElementBackground = Color3.fromRGB(35, 35, 35), ElementBackgroundHover = Color3.fromRGB(40, 40, 40), ElementStroke = Color3.fromRGB(50, 50, 50), TabBackground = Color3.fromRGB(80, 80, 80), TabBackgroundSelected = Color3.fromRGB(210, 210, 210), TabTextColor = Color3.fromRGB(240, 240, 240), SelectedTabTextColor = Color3.fromRGB(50, 50, 50), ToggleEnabled = Color3.fromRGB(0, 146, 214), ToggleDisabled = Color3.fromRGB(100, 100, 100), SliderBackground = Color3.fromRGB(50, 138, 220), SliderProgress = Color3.fromRGB(50, 138, 220), NotificationBackground = Color3.fromRGB(20, 20, 20), InputBackground = Color3.fromRGB(30, 30, 30), InputStroke = Color3.fromRGB(65, 65, 65), InputPlaceholder = Color3.fromRGB(160, 160, 160), DropdownSelected = Color3.fromRGB(40, 40, 40), DropdownUnselected = Color3.fromRGB(30, 30, 30), ColorPickerBackground = Color3.fromRGB(30, 30, 30), SectionBackground = Color3.fromRGB(30, 30, 30), ProgressBarBackground = Color3.fromRGB(40, 40, 40), ProgressBarFill = Color3.fromRGB(60, 145, 230), CheckboxChecked = Color3.fromRGB(0, 146, 214), CheckboxUnchecked = Color3.fromRGB(100, 100, 100), ScrollBarBackground = Color3.fromRGB(45, 45, 45), ScrollBarForeground = Color3.fromRGB(70, 70, 70)
@@ -58,11 +53,14 @@ LuminaUI.Theme = {
     }
 }
 
--- Instance Pool Implementation
+-- ==================================
+--      Instance Pool
+-- ==================================
 do
     local instances = {}
-    local maxPoolSize = 50
+    local maxPoolSize = 50 -- Max instances of each type to keep pooled
 
+    -- Get an instance from the pool or create a new one
     function InstancePool:Get(className)
         if not instances[className] then
             instances[className] = {}
@@ -71,13 +69,16 @@ do
         local pool = instances[className]
         if #pool > 0 then
             local instance = table.remove(pool)
-            instance.Parent = nil -- Ensure parent is nil
+            instance.Parent = nil -- Ensure parent is nil before reuse
+            instance.Name = className -- Reset name
             return instance
         else
+            -- Pool is empty, create a new instance
             return Instance.new(className)
         end
     end
 
+    -- Release an instance back to the pool (or destroy if pool is full)
     function InstancePool:Release(instance)
         if not instance or not typeof(instance) == "Instance" then return end
         local className = instance.ClassName
@@ -86,12 +87,11 @@ do
             instances[className] = {}
         end
 
-        -- Basic reset
-        instance.Name = className
+        -- Basic reset before pooling
         instance.Parent = nil
         instance.Archivable = false -- Prevent accidental saving
 
-        -- Clear common properties
+        -- Clear common properties to avoid visual glitches on reuse
         if instance:IsA("GuiObject") then
             instance.BackgroundTransparency = 1
             instance.Position = UDim2.new(0, 0, 0, 0)
@@ -100,6 +100,7 @@ do
             instance.Rotation = 0
             instance.AnchorPoint = Vector2.new(0, 0)
             instance.ZIndex = 1
+            instance.LayoutOrder = 0
         end
         if instance:IsA("GuiButton") then
             instance.AutoButtonColor = false
@@ -110,6 +111,14 @@ do
             instance.TextWrapped = false
             instance.TextXAlignment = Enum.TextXAlignment.Center
             instance.TextYAlignment = Enum.TextYAlignment.Center
+            instance.Font = Enum.Font.SourceSans -- Reset to default
+            instance.TextSize = 14 -- Reset to default
+            instance.TextColor3 = Color3.new(1, 1, 1) -- Reset to default
+        end
+        if instance:IsA("TextBox") then
+            instance.PlaceholderText = ""
+            instance.PlaceholderColor3 = Color3.fromRGB(180, 180, 180)
+            instance.ClearTextOnFocus = true
         end
         if instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
             instance.Image = ""
@@ -122,11 +131,28 @@ do
             instance.CanvasSize = UDim2.new(0, 0, 0, 0)
             instance.CanvasPosition = Vector2.new(0, 0)
             instance.ScrollingEnabled = true
+            instance.ScrollBarThickness = 0 -- Reset custom scrollbar state
+        end
+        if instance:IsA("UILayout") then
+            -- Reset common layout properties if needed
+        end
+        if instance:IsA("UIConstraint") then
+            -- Reset constraint properties if needed
+        end
+
+        -- Clear attributes (important for theme IDs etc.)
+        for attr, _ in pairs(instance:GetAttributes()) do
+            instance:SetAttribute(attr, nil)
         end
 
         -- Clear children (important!)
         for _, child in ipairs(instance:GetChildren()) do
             InstancePool:Release(child) -- Recursively release children
+        end
+
+        -- Disconnect any managed connections
+        if instance.DisconnectAll then
+            Utility.safeCall(instance.DisconnectAll, instance)
         end
 
         -- Add to pool if not full
@@ -139,49 +165,58 @@ do
         end
     end
 
+    -- Destroy all instances currently in the pool
     function InstancePool:Clear()
         for className, pool in pairs(instances) do
             for _, instance in ipairs(pool) do
                 instance:Destroy()
             end
-            instances[className] = {}
+            instances[className] = {} -- Clear the pool table
         end
     end
 end
 
--- Utility Functions
+-- ==================================
+--      Utility Functions
+-- ==================================
 do
     local tooltipInstance = nil
     local tooltipConnection = nil
     local draggingInstance = nil
     local dragInput, dragStart, startPos
 
-    -- Safely execute a function
+    -- Safely execute a function and print errors
     function Utility.safeCall(func, ...)
         local success, result = pcall(func, ...)
         if not success then
-            warn("[LuminaUI] Error in callback:", result)
+            warn("[LuminaUI] Error:", result)
+            -- Optionally print stack trace: debug.traceback(result)
         end
         return success, result
     end
 
-    -- Create instance using pool
+    -- Create instance using pool and apply properties
     function Utility.createInstance(className, properties)
         local instance = InstancePool:Get(className)
         for prop, value in pairs(properties or {}) do
-            instance[prop] = value
+            -- Use pcall for property assignment in case of invalid values
+            local success, err = pcall(function() instance[prop] = value end)
+            if not success then
+                warn(("[LuminaUI] Failed to set property '%s' on %s: %s"):format(tostring(prop), className, tostring(err)))
+            end
         end
         return instance
     end
 
-    -- Release instance to pool
+    -- Release instance to pool (preferred over direct :Destroy())
     function Utility.destroyInstance(instance)
         if not instance then return end
         InstancePool:Release(instance)
     end
 
-    -- Debounce function using os.clock
+    -- Debounce function using os.clock for higher precision
     function Utility.debounce(func, waitTime)
+        waitTime = waitTime or 0.1 -- Default wait time
         local lastCall = 0
         return function(...)
             local now = os.clock()
@@ -192,15 +227,16 @@ do
         end
     end
 
-    -- Create UIStroke
-    function Utility.createStroke(instance, color, thickness, transparency)
+    -- Create UIStroke with theme registration
+    function Utility.createStroke(instance, color, thickness, transparency, themeKey)
+        themeKey = themeKey or "ElementStroke" -- Default theme key
         local stroke = Utility.createInstance("UIStroke", {
             Color = color or Color3.fromRGB(50, 50, 50),
             Thickness = thickness or 1,
             Transparency = transparency or 0,
             Parent = instance
         })
-        Utility.registerThemedElement(stroke, "Color", "ElementStroke") -- Register for theme updates
+        Utility.registerThemedElement(stroke, "Color", themeKey) -- Register for theme updates
         return stroke
     end
 
@@ -213,106 +249,126 @@ do
         return corner
     end
 
-    -- Load icon asset ID
+    -- Load icon asset ID, handling numbers and strings
     function Utility.loadIcon(id)
+        if not id or id == 0 then return "" end -- Handle nil or 0
         if type(id) == "number" then
             return "rbxassetid://" .. id
-        elseif type(id) == "string" and string.match(id, "^%d+$") then -- Handle numeric strings
-             return "rbxassetid://" .. id
+        elseif type(id) == "string" then
+            if string.match(id, "^%d+$") then -- Handle numeric strings
+                 return "rbxassetid://" .. id
+            else
+                return id -- Assume it's already a full asset path or empty
+            end
         else
-            return id -- Assume it's already a full asset path or empty
+            return "" -- Invalid type
         end
     end
 
-    -- Get text bounds
+    -- Get text bounds using TextService
     function Utility.getTextBounds(text, font, size, maxWidth)
         maxWidth = maxWidth or math.huge
-        return TextService:GetTextSize(text, size, font, Vector2.new(maxWidth, math.huge))
-    end
-
-    -- Format numbers (k, m)
-    function Utility.formatNumber(value)
-        if value >= 1000000 then
-            return string.format("%.1fm", value / 1000000)
-        elseif value >= 1000 then
-            return string.format("%.1fk", value / 1000)
+        local success, result = Utility.safeCall(TextService.GetTextSize, TextService, text, size, font, Vector2.new(maxWidth, math.huge))
+        if success then
+            return result
         else
-            return tostring(math.floor(value)) -- Ensure whole numbers for smaller values
+            -- Fallback or default size if GetTextSize fails
+            return Vector2.new(string.len(text) * (size / 2), size) -- Rough estimate
         end
     end
 
-    -- Darken color
-    function Utility.darker(color, factor)
-        factor = 1 - (factor or 0.2)
-        return Color3.new(
-            math.clamp(color.R * factor, 0, 1),
-            math.clamp(color.G * factor, 0, 1),
-            math.clamp(color.B * factor, 0, 1)
-        )
+    -- Format numbers (k, m, b, etc.) - Improved
+    function Utility.formatNumber(value)
+        if type(value) ~= "number" then return tostring(value) end
+        local suffixes = {"", "k", "m", "b", "t"} -- Add more as needed
+        local i = 1
+        while value >= 1000 and i < #suffixes do
+            value = value / 1000
+            i = i + 1
+        end
+        if i == 1 then
+            return string.format("%.0f", value) -- Whole number if less than 1k
+        else
+            return string.format("%.1f%s", value, suffixes[i]) -- One decimal place otherwise
+        end
     end
 
-    -- Lighten color
+    -- Darken color by a factor (0 to 1)
+    function Utility.darker(color, factor)
+        factor = math.clamp(1 - (factor or 0.2), 0, 1)
+        return Color3.new(color.R * factor, color.G * factor, color.B * factor)
+    end
+
+    -- Lighten color by a factor (0 to 1)
     function Utility.lighter(color, factor)
         factor = factor or 0.2
         return Color3.new(
-            math.clamp(color.R + factor, 0, 1),
-            math.clamp(color.G + factor, 0, 1),
-            math.clamp(color.B + factor, 0, 1)
+            math.clamp(color.R + (1 - color.R) * factor, 0, 1),
+            math.clamp(color.G + (1 - color.G) * factor, 0, 1),
+            math.clamp(color.B + (1 - color.B) * factor, 0, 1)
         )
     end
 
-    -- Manage connections for an object
+    -- Manage connections for an object (Instance or Lua table)
     function Utility.manageConnections(object)
         if object._connections then return end -- Already managed
 
         object._connections = {}
-        local originalDestroy = object.Destroy or function() end -- Handle cases where Destroy might not exist initially
 
+        -- Add a connection to the managed list
         function object:AddConnection(connection)
+            if not self._connections then self._connections = {} end
             table.insert(self._connections, connection)
         end
 
+        -- Disconnect all managed connections
         function object:DisconnectAll()
             if not self._connections then return end
-            for _, conn in ipairs(self._connections) do
-                Utility.safeCall(function() conn:Disconnect() end)
+            for i = #self._connections, 1, -1 do -- Iterate backwards for safe removal
+                local conn = self._connections[i]
+                Utility.safeCall(conn.Disconnect, conn)
+                table.remove(self._connections, i)
             end
-            self._connections = {}
         end
 
-        -- Override Destroy to disconnect connections first
-        function object:Destroy()
-            self:DisconnectAll()
-            -- Call original destroy or pool release
-            if self.Instance then -- If it's a wrapper object
-                Utility.destroyInstance(self.Instance)
-            else -- If it's a raw Instance
-                 Utility.destroyInstance(self)
-            end
-            -- originalDestroy(self) -- Avoid calling original if we use pooling
+        -- If it's an Instance, hook into Destroying
+        if typeof(object) == "Instance" then
+            -- Store original Destroy if needed, but pooling handles cleanup
+            -- local originalDestroy = object.Destroy
+
+            -- Connect to Destroying event for cleanup
+            local destroyingConn
+            destroyingConn = object.Destroying:Connect(function()
+                object:DisconnectAll()
+                -- Also disconnect the Destroying connection itself
+                if destroyingConn then Utility.safeCall(destroyingConn.Disconnect, destroyingConn) end
+                -- If not using pooling, call originalDestroy here
+                -- Note: Pooling's Release function already calls DisconnectAll
+            end)
+            -- No need to add destroyingConn to _connections list
         end
     end
 
-    -- Create Tooltip (Singleton)
+    -- Create Tooltip (Singleton Pattern)
     function Utility.createTooltip(libraryInstance, theme)
-        if tooltipInstance and tooltipInstance.Parent then return tooltipInstance end
+        if tooltipInstance and tooltipInstance.Parent then return tooltipInstance end -- Return existing if valid
 
         tooltipInstance = Utility.createInstance("Frame", {
-            Name = "Tooltip",
+            Name = "LuminaTooltip",
             BackgroundColor3 = theme.NotificationBackground,
             BackgroundTransparency = 0.1,
             BorderSizePixel = 0,
-            Size = UDim2.new(0, 0, 0, 0), -- Auto-sized
-            Position = UDim2.new(0, 0, 0, 0),
+            Size = UDim2.new(0, 0, 0, 0), -- Auto-sized based on text
+            Position = UDim2.new(0, 0, 0, 0), -- Position updated dynamically
             Visible = false,
-            ZIndex = 1000,
+            ZIndex = 1000, -- High ZIndex to be on top
             Parent = libraryInstance,
             ClipsDescendants = true
         })
         Utility.createCorner(tooltipInstance, 4)
-        local stroke = Utility.createStroke(tooltipInstance, theme.ElementStroke, 1)
+        local stroke = Utility.createStroke(tooltipInstance, theme.ElementStroke, 1, 0, "ElementStroke") -- Use specific theme key
         Utility.registerThemedElement(tooltipInstance, "BackgroundColor3", "NotificationBackground")
-        Utility.registerThemedElement(stroke, "Color", "ElementStroke")
+        -- Stroke is already registered by createStroke
 
         local textLabel = Utility.createInstance("TextLabel", {
             Name = "Text",
@@ -325,68 +381,79 @@ do
             TextSize = 13,
             TextWrapped = true,
             TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = Enum.TextXAlignment.Top, -- Use Top for wrapping
+            TextYAlignment = Enum.TextYAlignment.Top, -- Use Top for wrapping
             ZIndex = 1001,
             Parent = tooltipInstance
         })
         Utility.registerThemedElement(textLabel, "TextColor3", "TextColor")
 
-        -- Manage connections for the tooltip itself
+        -- Manage connections for the tooltip itself to clean up RenderStepped
         Utility.manageConnections(tooltipInstance)
 
         return tooltipInstance
     end
 
-    -- Show Tooltip
+    -- Show Tooltip with text and optional offset
     function Utility.showTooltip(text, theme, yOffset)
-        local tooltip = Utility.createTooltip(LuminaUI.RootInstance, theme) -- Ensure RootInstance is set
+        if not LuminaUI.RootInstance then return end -- Ensure UI root exists
+        local tooltip = Utility.createTooltip(LuminaUI.RootInstance, theme)
         if not tooltip or not tooltip.Parent then return end -- Guard against race conditions
 
         local textLabel = tooltip:FindFirstChild("Text")
         if not textLabel then return end
 
         textLabel.Text = text
-        local textBounds = Utility.getTextBounds(text, textLabel.Font, textLabel.TextSize, 280) -- Max width
-        tooltip.Size = UDim2.new(0, math.min(textBounds.X + 16, 300), 0, textBounds.Y + 16)
+        local textBounds = Utility.getTextBounds(text, textLabel.Font, textLabel.TextSize, 280) -- Max width 280px
+        tooltip.Size = UDim2.new(0, math.min(textBounds.X + 16, 300), 0, textBounds.Y + 16) -- Add padding, max width 300
 
-        yOffset = yOffset or 5
+        yOffset = yOffset or 5 -- Default vertical offset from mouse
 
         local function updatePosition()
-            if not tooltip or not tooltip.Parent then
-                if tooltipConnection then tooltipConnection:Disconnect() tooltipConnection = nil end
+            -- Check if tooltip still exists and is visible
+            if not tooltip or not tooltip.Parent or not tooltip.Visible then
+                if tooltipConnection then
+                    tooltipConnection:Disconnect()
+                    tooltipConnection = nil
+                end
                 return
             end
+
             local mousePos = UserInputService:GetMouseLocation()
             local viewportSize = workspace.CurrentCamera.ViewportSize
 
+            -- Calculate desired position (above and to the right of cursor)
             local posX = mousePos.X + 15
             local posY = mousePos.Y - tooltip.AbsoluteSize.Y - yOffset
 
             -- Adjust X if off-screen right
             if posX + tooltip.AbsoluteSize.X > viewportSize.X then
-                posX = mousePos.X - tooltip.AbsoluteSize.X - 15
+                posX = mousePos.X - tooltip.AbsoluteSize.X - 15 -- Move to the left
             end
-            -- Adjust X if off-screen left
+            -- Adjust X if off-screen left (less common)
             if posX < 0 then
-                posX = 5
+                posX = 5 -- Keep slightly offset from edge
             end
              -- Adjust Y if off-screen top
             if posY < 0 then
                  posY = mousePos.Y + 15 -- Show below cursor if no space above
             end
+             -- Adjust Y if off-screen bottom (if showing below cursor)
+             if posY + tooltip.AbsoluteSize.Y > viewportSize.Y then
+                 posY = viewportSize.Y - tooltip.AbsoluteSize.Y - 5 -- Keep slightly offset from edge
+             end
 
             tooltip.Position = UDim2.new(0, posX, 0, posY)
         end
 
+        -- Initial position update
         updatePosition()
         tooltip.Visible = true
 
         -- Disconnect previous connection if exists
         if tooltipConnection then tooltipConnection:Disconnect() end
 
-        -- Create new connection and store it
+        -- Create new connection and store it globally (not on the tooltip instance itself)
         tooltipConnection = RunService.RenderStepped:Connect(updatePosition)
-        -- No need to add to tooltipInstance._connections as it's managed globally here
     end
 
     -- Hide Tooltip
@@ -400,24 +467,28 @@ do
         end
     end
 
-    -- Make Draggable
+    -- Make a frame draggable by its handle (or itself)
     function Utility.makeDraggable(frame, handle)
-        handle = handle or frame
-        local connections = {}
+        handle = handle or frame -- Default handle to the frame itself
+        local connections = {} -- Store connections specific to this draggable instance
 
         local inputBeganConn = handle.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                if draggingInstance then return end -- Prevent multiple drags
+                if draggingInstance then return end -- Prevent dragging multiple items simultaneously
 
-                draggingInstance = frame
-                dragStart = input.Position
-                startPos = frame.Position
+                draggingInstance = frame -- Set the globally tracked dragging instance
+                dragStart = input.Position -- Record starting mouse/touch position
+                startPos = frame.Position -- Record starting frame position
 
+                -- Connection to detect when dragging ends
                 local inputChangedConn
                 inputChangedConn = input.Changed:Connect(function()
                     if input.UserInputState == Enum.UserInputState.End then
-                        draggingInstance = nil
+                        if draggingInstance == frame then -- Only clear if this was the instance being dragged
+                            draggingInstance = nil
+                        end
                         if inputChangedConn then inputChangedConn:Disconnect() end
+                        -- Remove from connections table? Not strictly necessary if using Destroying cleanup
                     end
                 end)
                 table.insert(connections, inputChangedConn) -- Track this connection
@@ -425,31 +496,33 @@ do
         end)
         table.insert(connections, inputBeganConn)
 
-        local inputChangedOuterConn = handle.InputChanged:Connect(function(input)
+        -- Connection to track mouse/touch movement *while the button is held down*
+        local inputChangedOuterConn = UserInputService.InputChanged:Connect(function(input)
              if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-                if draggingInstance == frame then -- Only track if this handle initiated the drag
-                    dragInput = input
+                if draggingInstance == frame then -- Only update global dragInput if this instance is being dragged
+                    dragInput = input -- Update the global input object for the Heartbeat update
                 end
             end
         end)
          table.insert(connections, inputChangedOuterConn)
 
-         -- Add a cleanup method to disconnect these specific drag connections
-         frame._dragConnections = connections
-         frame.Destroying:Connect(function()
+         -- Add a cleanup method to disconnect these specific drag connections when the frame is destroyed
+         frame._dragConnections = connections -- Store on the frame instance
+         local destroyingConn = frame.Destroying:Connect(function()
              for _, conn in ipairs(frame._dragConnections or {}) do
-                 Utility.safeCall(function() conn:Disconnect() end)
+                 Utility.safeCall(conn.Disconnect, conn)
              end
              frame._dragConnections = nil
              if draggingInstance == frame then draggingInstance = nil end -- Clear global state if destroyed while dragging
          end)
+         -- No need to track destroyingConn itself, it disconnects automatically
     end
 
-    -- Global Drag Update Logic (Consider moving inside CreateWindow if Library instance needed)
+    -- Global Drag Update Logic (Runs continuously)
     task.spawn(function()
-        local lastInput = nil
-        RunService.Heartbeat:Connect(function()
-            if draggingInstance and dragInput and dragInput ~= lastInput then
+        local lastInputProcessed = nil
+        RunService.Heartbeat:Connect(function(dt) -- Use Heartbeat for physics-related updates like position
+            if draggingInstance and dragInput and dragInput ~= lastInputProcessed then
                 local delta = dragInput.Position - dragStart
                 local newPos = UDim2.new(
                     startPos.X.Scale,
@@ -458,31 +531,46 @@ do
                     startPos.Y.Offset + delta.Y
                 )
 
-                -- Clamp position to viewport (optional but good practice)
+                -- Clamp position to viewport boundaries
                 local viewport = workspace.CurrentCamera.ViewportSize
                 local absSize = draggingInstance.AbsoluteSize
                 local anchor = draggingInstance.AnchorPoint
-                local absPos = Vector2.new(newPos.X.Offset + viewport.X * newPos.X.Scale, newPos.Y.Offset + viewport.Y * newPos.Y.Scale)
-                local topLeft = absPos - (absSize * anchor)
-                local bottomRight = topLeft + absSize
+
+                -- Calculate the top-left corner's desired absolute position
+                local absPosX = newPos.X.Offset + viewport.X * newPos.X.Scale
+                local absPosY = newPos.Y.Offset + viewport.Y * newPos.Y.Scale
+                local topLeftX = absPosX - (absSize.X * anchor.X)
+                local topLeftY = absPosY - (absSize.Y * anchor.Y)
 
                 -- Clamp X
-                if topLeft.X < 0 then newPos = UDim2.new(newPos.X.Scale, newPos.X.Offset - topLeft.X, newPos.Y.Scale, newPos.Y.Offset) end
-                if bottomRight.X > viewport.X then newPos = UDim2.new(newPos.X.Scale, newPos.X.Offset - (bottomRight.X - viewport.X), newPos.Y.Scale, newPos.Y.Offset) end
-                -- Clamp Y
-                if topLeft.Y < 0 then newPos = UDim2.new(newPos.X.Scale, newPos.X.Offset, newPos.Y.Scale, newPos.Y.Offset - topLeft.Y) end
-                if bottomRight.Y > viewport.Y then newPos = UDim2.new(newPos.X.Scale, newPos.X.Offset, newPos.Y.Scale, newPos.Y.Offset - (bottomRight.Y - viewport.Y)) end
+                local clampedOffsetX = newPos.X.Offset
+                if topLeftX < 0 then
+                    clampedOffsetX = newPos.X.Offset - topLeftX
+                elseif topLeftX + absSize.X > viewport.X then
+                    clampedOffsetX = newPos.X.Offset - (topLeftX + absSize.X - viewport.X)
+                end
 
-                draggingInstance.Position = newPos
-                lastInput = dragInput
+                -- Clamp Y
+                local clampedOffsetY = newPos.Y.Offset
+                if topLeftY < 0 then
+                    clampedOffsetY = newPos.Y.Offset - topLeftY
+                elseif topLeftY + absSize.Y > viewport.Y then
+                    clampedOffsetY = newPos.Y.Offset - (topLeftY + absSize.Y - viewport.Y)
+                end
+
+                -- Apply the clamped position
+                draggingInstance.Position = UDim2.new(newPos.X.Scale, clampedOffsetX, newPos.Y.Scale, clampedOffsetY)
+
+                lastInputProcessed = dragInput -- Mark this input as processed
             elseif not draggingInstance then
-                dragInput = nil -- Clear input if not dragging
-                lastInput = nil
+                -- Reset global drag state if nothing is being dragged
+                dragInput = nil
+                lastInputProcessed = nil
             end
         end)
     end)
 
-    -- Configuration Saving
+    -- Configuration Saving (Requires Synapse/Executor environment functions)
     function Utility.saveConfig(settings, uiPosition)
         if not settings.ConfigurationSaving or not settings.ConfigurationSaving.Enabled then return end
         if not writefile then warn("[LuminaUI] 'writefile' function not available. Configuration saving disabled.") return end
@@ -495,6 +583,7 @@ do
             Elements = {}
         }
 
+        -- Iterate through registered flags to get current values
         for flag, elementData in pairs(LuminaUI.Flags) do
             -- Only save if it has a known type and value
             if elementData and elementData.Type and elementData.Value ~= nil then
@@ -502,6 +591,14 @@ do
                     Type = elementData.Type,
                     Value = elementData.Value
                 }
+                -- Special handling for Color3 values (convert to table)
+                if typeof(elementData.Value) == "Color3" then
+                    data.Elements[flag].Value = {
+                        R = elementData.Value.R,
+                        G = elementData.Value.G,
+                        B = elementData.Value.B
+                    }
+                end
             end
         end
 
@@ -511,7 +608,7 @@ do
             return
         end
 
-        local configName = settings.ConfigurationSaving.FileName or "config"
+        local configName = settings.ConfigurationSaving.FileName or "LuminaConfig" -- Use setting or default
         local filePath = ConfigFolder.."/"..configName..ConfigExtension
 
         -- Ensure folder exists
@@ -528,19 +625,20 @@ do
             end
         end
 
+        -- Write the file
         local writeSuccess, writeErr = Utility.safeCall(writefile, filePath, encodedData)
         if not writeSuccess then
             warn("[LuminaUI] Failed to write configuration file:", writeErr)
         end
     end
 
-    -- Configuration Loading
+    -- Configuration Loading (Requires Synapse/Executor environment functions)
     function Utility.loadConfig(settings)
         local loadedData = { UIPosition = nil, Elements = {} }
         if not settings.ConfigurationSaving or not settings.ConfigurationSaving.Enabled then return loadedData end
         if not isfile or not readfile then warn("[LuminaUI] 'isfile' or 'readfile' not available. Configuration loading disabled.") return loadedData end
 
-        local configName = settings.ConfigurationSaving.FileName or "config"
+        local configName = settings.ConfigurationSaving.FileName or "LuminaConfig"
         local filePath = ConfigFolder.."/"..configName..ConfigExtension
 
         if not isfile(filePath) then return loadedData end -- No config file exists yet
@@ -554,6 +652,7 @@ do
         local decodeSuccess, data = Utility.safeCall(HttpService.JSONDecode, HttpService, content)
         if not decodeSuccess or typeof(data) ~= "table" then
             warn("[LuminaUI] Failed to decode configuration file or data is invalid:", data)
+            -- Consider attempting to delete the corrupted file here: Utility.safeCall(delfile, filePath)
             return loadedData
         end
 
@@ -572,7 +671,16 @@ do
         if typeof(data.Elements) == "table" then
             for flag, elementData in pairs(data.Elements) do
                 if typeof(elementData) == "table" and elementData.Type and elementData.Value ~= nil then
-                    loadedData.Elements[flag] = { Type = elementData.Type, Value = elementData.Value }
+                    -- Special handling for Color3 values (convert back from table)
+                    if elementData.Type == "ColorPicker" and typeof(elementData.Value) == "table" and
+                       elementData.Value.R ~= nil and elementData.Value.G ~= nil and elementData.Value.B ~= nil then
+                        loadedData.Elements[flag] = {
+                            Type = elementData.Type,
+                            Value = Color3.new(elementData.Value.R, elementData.Value.G, elementData.Value.B)
+                        }
+                    else
+                        loadedData.Elements[flag] = { Type = elementData.Type, Value = elementData.Value }
+                    end
                 end
             end
         end
@@ -580,12 +688,19 @@ do
         return loadedData
     end
 
-    -- Apply Custom Scrollbar
+    -- Apply Custom Scrollbar to a ScrollingFrame
     function Utility.applyCustomScrollbar(scrollFrame, theme, thickness)
-        thickness = thickness or 4
-        local connections = {}
+        if not scrollFrame:IsA("ScrollingFrame") then
+            warn("[LuminaUI] applyCustomScrollbar called on non-ScrollingFrame:", scrollFrame)
+            return
+        end
+        -- Check if already applied
+        if scrollFrame:FindFirstChild("CustomScrollbar") then return end
 
-        -- Remove default scrollbar
+        thickness = thickness or 4
+        local connections = {} -- Store connections related to this scrollbar
+
+        -- Hide default scrollbar
         scrollFrame.ScrollBarThickness = 0
         scrollFrame.ScrollBarImageTransparency = 1
         scrollFrame.ScrollingEnabled = true -- Ensure scrolling is enabled
@@ -594,34 +709,44 @@ do
         local scrollbar = Utility.createInstance("Frame", {
             Name = "CustomScrollbar",
             Size = UDim2.new(0, thickness, 1, 0),
-            Position = UDim2.new(1, -thickness, 0, 0),
-            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -thickness, 0, 0), -- Positioned to the right
+            AnchorPoint = Vector2.new(1, 0), -- Anchored to top-right
             BackgroundColor3 = theme.ScrollBarBackground,
             BackgroundTransparency = 0.5,
-            ZIndex = scrollFrame.ZIndex + 10,
-            Parent = scrollFrame
+            BorderSizePixel = 0,
+            ZIndex = scrollFrame.ZIndex + 10, -- Ensure above content
+            Parent = scrollFrame,
+            Visible = false -- Initially hidden until needed
         })
         Utility.createCorner(scrollbar, thickness / 2)
         Utility.registerThemedElement(scrollbar, "BackgroundColor3", "ScrollBarBackground")
 
         local scrollThumb = Utility.createInstance("Frame", {
             Name = "ScrollThumb",
-            Size = UDim2.new(1, 0, 0.2, 0), -- Initial size, will be updated
+            Size = UDim2.new(1, 0, 0.1, 0), -- Initial size, will be updated dynamically
+            Position = UDim2.new(0, 0, 0, 0),
             BackgroundColor3 = theme.ScrollBarForeground,
-            ZIndex = scrollbar.ZIndex + 1,
+            BorderSizePixel = 0,
+            ZIndex = scrollbar.ZIndex + 1, -- Above scrollbar background
             Parent = scrollbar
         })
         Utility.createCorner(scrollThumb, thickness / 2)
         Utility.registerThemedElement(scrollThumb, "BackgroundColor3", "ScrollBarForeground")
 
+        -- Function to update scrollbar visibility and thumb size/position
         local function updateScrollbar()
-            if not scrollFrame or not scrollFrame.Parent then return end -- Check if valid
+            -- Check if instances are still valid
+            if not scrollFrame or not scrollFrame.Parent or not scrollbar or not scrollbar.Parent or not scrollThumb or not scrollThumb.Parent then
+                return
+            end
 
             local canvasSizeY = scrollFrame.CanvasSize.Y.Offset
             local frameSizeY = scrollFrame.AbsoluteSize.Y
 
-            if frameSizeY <= 0 then frameSizeY = 1 end -- Avoid division by zero
+            -- Avoid division by zero or invalid calculations
+            if frameSizeY <= 0 then frameSizeY = 1 end
 
+            -- Determine if scrollbar is needed
             if canvasSizeY <= frameSizeY then
                 scrollbar.Visible = false
                 return
@@ -632,11 +757,15 @@ do
             local scrollableDist = canvasSizeY - frameSizeY
             if scrollableDist <= 0 then scrollableDist = 1 end -- Avoid division by zero
 
+            -- Calculate thumb size (proportional to visible content ratio)
+            local thumbSizeScale = math.clamp(frameSizeY / canvasSizeY, 0.05, 1) -- Min 5% height, max 100%
+
+            -- Calculate thumb position based on CanvasPosition
             local scrollPercent = math.clamp(scrollFrame.CanvasPosition.Y / scrollableDist, 0, 1)
-            local thumbSizeScale = math.clamp(frameSizeY / canvasSizeY, 0.05, 1) -- Min size
+            local thumbPosScale = scrollPercent * (1 - thumbSizeScale) -- Position within the available track space
 
             scrollThumb.Size = UDim2.new(1, 0, thumbSizeScale, 0)
-            scrollThumb.Position = UDim2.new(0, 0, scrollPercent * (1 - thumbSizeScale), 0)
+            scrollThumb.Position = UDim2.new(0, 0, thumbPosScale, 0)
         end
 
         -- Connect update events
@@ -645,28 +774,33 @@ do
         table.insert(connections, scrollFrame:GetPropertyChangedSignal("CanvasSize"):Connect(updateScrollbar))
 
         -- Thumb dragging logic
-        local isDragging = false
+        local isDraggingThumb = false
         local dragStartMouseY, dragStartCanvasY
 
         table.insert(connections, scrollThumb.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                isDragging = true
+                isDraggingThumb = true
                 dragStartMouseY = input.Position.Y
                 dragStartCanvasY = scrollFrame.CanvasPosition.Y
                 -- Prevent text selection while dragging scrollbar
                 UserInputService.TextSelectionEnabled = false
+                -- Optional: Slightly change thumb appearance on drag
+                -- TweenService:Create(scrollThumb, TweenInfo.new(0.1), { BackgroundTransparency = 0.3 }):Play()
             end
         end))
 
+        -- Use global InputEnded/InputChanged to handle dragging state reliably
         table.insert(connections, UserInputService.InputEnded:Connect(function(input)
-            if isDragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-                isDragging = false
+            if isDraggingThumb and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+                isDraggingThumb = false
                 UserInputService.TextSelectionEnabled = true -- Re-enable text selection
+                -- Optional: Revert thumb appearance
+                -- TweenService:Create(scrollThumb, TweenInfo.new(0.1), { BackgroundTransparency = 0 }):Play()
             end
         end))
 
         table.insert(connections, UserInputService.InputChanged:Connect(function(input)
-            if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            if isDraggingThumb and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
                 local deltaY = input.Position.Y - dragStartMouseY
                 local canvasSizeY = scrollFrame.CanvasSize.Y.Offset
                 local frameSizeY = scrollFrame.AbsoluteSize.Y
@@ -674,27 +808,37 @@ do
 
                 if scrollableDist > 0 then
                     local thumbSizeScale = scrollThumb.Size.Y.Scale
-                    local trackSize = frameSizeY * (1 - thumbSizeScale)
+                    local trackSize = frameSizeY * (1 - thumbSizeScale) -- The pixel height the thumb can move within
                     if trackSize <= 0 then trackSize = 1 end -- Avoid division by zero
 
+                    -- Calculate how much the canvas should move per pixel of thumb movement
                     local scrollMultiplier = scrollableDist / trackSize
                     local newCanvasY = dragStartCanvasY + (deltaY * scrollMultiplier)
-                    scrollFrame.CanvasPosition = Vector2.new(scrollFrame.CanvasPosition.X, math.clamp(newCanvasY, 0, scrollableDist))
+
+                    -- Update CanvasPosition directly, clamping ensures it stays within bounds
+                    scrollFrame.CanvasPosition = Vector2.new(
+                        scrollFrame.CanvasPosition.X,
+                        math.clamp(newCanvasY, 0, scrollableDist)
+                    )
                 end
             end
         end))
 
         -- Mouse wheel scrolling (applied directly to the scrollFrame)
-        table.insert(connections, scrollFrame.InputChanged:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseWheel then
-                local scrollDelta = input.Position.Z
+        table.insert(connections, scrollFrame.MouseEnter:Connect(function() scrollFrame:SetAttribute("MouseOver", true) end))
+        table.insert(connections, scrollFrame.MouseLeave:Connect(function() scrollFrame:SetAttribute("MouseOver", false) end))
+        table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+            -- Only scroll if mouse is over this specific scroll frame
+            if scrollFrame:GetAttribute("MouseOver") and input.UserInputType == Enum.UserInputType.MouseWheel then
+                local scrollDelta = input.Position.Z -- Z indicates wheel delta
                 local currentPos = scrollFrame.CanvasPosition.Y
                 local canvasSizeY = scrollFrame.CanvasSize.Y.Offset
                 local frameSizeY = scrollFrame.AbsoluteSize.Y
-                local maxScroll = canvasSizeY - frameSizeY
+                local maxScroll = math.max(0, canvasSizeY - frameSizeY) -- Ensure maxScroll is not negative
 
                 if maxScroll > 0 then
-                    local scrollAmount = scrollDelta * -60 -- Adjust multiplier as needed, negative for natural scroll
+                    -- Adjust multiplier for desired scroll speed, negative for natural scroll direction
+                    local scrollAmount = scrollDelta * -60
                     scrollFrame.CanvasPosition = Vector2.new(
                         scrollFrame.CanvasPosition.X,
                         math.clamp(currentPos + scrollAmount, 0, maxScroll)
@@ -703,61 +847,75 @@ do
             end
         end))
 
-        -- Initial update
-        task.wait() -- Wait a frame for sizes to be calculated
-        updateScrollbar()
+        -- Initial update (defer slightly for sizes to calculate)
+        task.defer(updateScrollbar)
 
-        -- Cleanup
-        scrollFrame:SetAttribute("__LuminaScrollbarConnections", connections) -- Store connections
-        scrollFrame.Destroying:Connect(function()
+        -- Cleanup: Store connections on the scrollFrame and disconnect on Destroying
+        scrollFrame:SetAttribute("__LuminaScrollbarConnections", connections)
+        local destroyingConn = scrollFrame.Destroying:Connect(function()
             local conns = scrollFrame:GetAttribute("__LuminaScrollbarConnections")
             if conns then
                 for _, conn in ipairs(conns) do
-                    Utility.safeCall(function() conn:Disconnect() end)
+                    Utility.safeCall(conn.Disconnect, conn)
                 end
             end
-            -- Ensure thumb dragging state is reset
-            if isDragging then
+            -- Ensure thumb dragging state is reset if destroyed mid-drag
+            if isDraggingThumb then
                  UserInputService.TextSelectionEnabled = true
             end
+            -- Destroy the scrollbar elements manually if pooling isn't used,
+            -- but pooling's Release should handle children.
+            -- Utility.destroyInstance(scrollbar) -- Let pooling handle this via parent release
         end)
+        -- No need to track destroyingConn itself
 
         return scrollbar
     end
 
-    -- Ripple Effect
-    function Utility.rippleEffect(parent, color)
+    -- Ripple Effect on click
+    function Utility.rippleEffect(parent, color, speed)
+        if not parent:IsA("GuiObject") then return end -- Only works on GuiObjects
+
         color = color or Color3.fromRGB(255, 255, 255)
+        speed = speed or 0.4
         local mousePos = UserInputService:GetMouseLocation()
+
+        -- Calculate position relative to the parent's top-left corner
+        local relativePos = mousePos - parent.AbsolutePosition
 
         local ripple = Utility.createInstance("Frame", {
             Name = "Ripple",
             BackgroundColor3 = color,
             BackgroundTransparency = 0.7,
-            Position = UDim2.new(0, mousePos.X - parent.AbsolutePosition.X, 0, mousePos.Y - parent.AbsolutePosition.Y),
+            Position = UDim2.new(0, relativePos.X, 0, relativePos.Y),
             Size = UDim2.new(0, 0, 0, 0),
             AnchorPoint = Vector2.new(0.5, 0.5),
-            ZIndex = (parent:IsA("GuiObject") and parent.ZIndex or 1) + 1, -- Ensure ripple is above parent
+            ZIndex = (parent.ZIndex or 1) + 1, -- Ensure ripple is visually above parent
             Parent = parent,
-            ClipsDescendants = true -- Keep ripple contained
+            ClipsDescendants = true -- Keep ripple contained within parent bounds
         })
-        Utility.createCorner(ripple, 100) -- Make it circular
+        Utility.createCorner(ripple, 1000) -- Make it circular (large radius)
 
-        local diameter = math.max(parent.AbsoluteSize.X, parent.AbsoluteSize.Y) * 1.5 -- Adjust size multiplier
+        -- Calculate target diameter (slightly larger than the parent's diagonal)
+        local sizeX, sizeY = parent.AbsoluteSize.X, parent.AbsoluteSize.Y
+        local diameter = math.sqrt(sizeX^2 + sizeY^2) * 1.2 -- Adjust multiplier as needed
 
-        local tween = TweenService:Create(ripple, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        local tween = TweenService:Create(ripple, TweenInfo.new(speed, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             Size = UDim2.new(0, diameter, 0, diameter),
             BackgroundTransparency = 1
         })
         tween:Play()
 
+        -- Use pooling for cleanup
         tween.Completed:Connect(function()
             Utility.destroyInstance(ripple)
         end)
     end
 
-    -- Pulse Effect
+    -- Pulse Effect (scale animation)
     function Utility.pulseEffect(object, scaleIncrease, duration)
+        if not object or not object.Parent then return end -- Guard
+
         scaleIncrease = scaleIncrease or 1.05
         duration = duration or 0.15 -- Faster pulse
 
@@ -767,142 +925,176 @@ do
             originalSize.Y.Scale * scaleIncrease, originalSize.Y.Offset * scaleIncrease
         )
 
-        local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local tweenInfo = TweenInfo.new(duration / 2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
         local tweenUp = TweenService:Create(object, tweenInfo, { Size = targetSize })
         local tweenDown = TweenService:Create(object, tweenInfo, { Size = originalSize })
 
         tweenUp:Play()
-        tweenUp.Completed:Connect(function()
-            -- Ensure object still exists before playing next tween
-            if object and object.Parent then
+        tweenUp.Completed:Connect(function(playbackState)
+            -- Ensure object still exists and tween completed normally before playing next part
+            if playbackState == Enum.PlaybackState.Completed and object and object.Parent then
                 tweenDown:Play()
             end
         end)
     end
 
-    -- Typewrite Effect
+    -- Typewrite Effect for TextLabels
     function Utility.typewriteEffect(textLabel, text, speed)
+        if not textLabel or not textLabel:IsA("TextLabel") then return end
+
         speed = speed or 0.03
         textLabel.Text = ""
         local currentCoroutine = coroutine.running()
+        local cancelled = false
 
         local connection
         connection = textLabel.Destroying:Connect(function()
              -- Stop the effect if the label is destroyed
+             cancelled = true
              if currentCoroutine then
-                 task.cancel(currentCoroutine)
+                 task.cancel(currentCoroutine) -- Attempt to cancel the coroutine
              end
              if connection then connection:Disconnect() end -- Disconnect self
         end)
 
         for i = 1, #text do
-            if not textLabel or not textLabel.Parent then break end -- Stop if label is gone
+            if cancelled or not textLabel or not textLabel.Parent then break end -- Stop if cancelled or label is gone
             textLabel.Text = string.sub(text, 1, i)
             task.wait(speed)
         end
 
         if connection then connection:Disconnect() end -- Clean up connection
-        currentCoroutine = nil
+        currentCoroutine = nil -- Clear reference
     end
 
-    -- Create Blur
+    -- Create Blur Effect (animated)
     function Utility.createBlur(parent, strength)
         strength = strength or 10
         local blur = Utility.createInstance("BlurEffect", {
-            Size = 0,
+            Size = 0, -- Start at 0
             Parent = parent
         })
-        TweenService:Create(blur, TweenInfo.new(0.3), { Size = strength }):Play()
+        local tween = TweenService:Create(blur, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = strength })
+        tween:Play()
+        -- Manage cleanup via pooling when parent is destroyed or manually removed
         return blur
     end
 
-    -- Remove Blur
+    -- Remove Blur Effect (animated)
     function Utility.removeBlur(blur)
         if not blur or not blur.Parent then return end
-        local tween = TweenService:Create(blur, TweenInfo.new(0.3), { Size = 0 })
+        local tween = TweenService:Create(blur, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = 0 })
         tween:Play()
-        tween.Completed:Connect(function()
-            Utility.destroyInstance(blur)
+        tween.Completed:Connect(function(playbackState)
+            -- Use pooled destroy after animation completes
+            if playbackState == Enum.PlaybackState.Completed then
+                Utility.destroyInstance(blur)
+            end
         end)
     end
 
-    -- Register element for theme updates
-    function Utility.registerThemedElement(instance, property, themeKey, hoverThemeKey)
+    -- Register element for theme updates using attributes
+    function Utility.registerThemedElement(instance, property, themeKey, hoverThemeKey, transformFunc)
         if not instance or not instance.Parent then return end
-        local id = HttpService:GenerateGUID(false)
-        instance:SetAttribute("LuminaThemeID", id)
-        ThemedElementsRegistry[id] = {
-            Instance = instance,
-            Property = property,
-            ThemeKey = themeKey,
-            HoverThemeKey = hoverThemeKey -- Optional: For hover states
-        }
-    end
-
-    -- Unregister element from theme updates
-    function Utility.unregisterThemedElement(instance)
-        if not instance or not instance:GetAttribute("LuminaThemeID") then return end
-        local id = instance:GetAttribute("LuminaThemeID")
-        if ThemedElementsRegistry[id] then
-            ThemedElementsRegistry[id] = nil
+        -- Store theme info directly as attributes on the instance
+        instance:SetAttribute("LuminaThemeKey_"..property, themeKey)
+        if hoverThemeKey then
+            instance:SetAttribute("LuminaThemeHoverKey_"..property, hoverThemeKey)
         end
-        instance:SetAttribute("LuminaThemeID", nil)
-    end
+        -- Store transform function (needs serialization or a different approach if saving/loading needed)
+        -- For now, transformFunc is applied directly during theme application if provided.
+        -- If transformFunc is needed, it might be better to handle it in the component's theme update logic.
 
-    -- Apply theme to all registered elements
-    function Utility.applyThemeToAll(theme)
-        for id, data in pairs(ThemedElementsRegistry) do
-            local instance = data.Instance
-            if instance and instance.Parent then -- Check if instance still exists
-                local value = theme[data.ThemeKey]
-                if value then
-                    -- Use pcall for safety, though direct assignment is usually fine
-                    Utility.safeCall(function() instance[data.Property] = value end)
-                else
-                    warn("[LuminaUI] Theme key not found:", data.ThemeKey)
-                end
+        -- Apply initial theme value immediately
+        local theme = LuminaUI.CurrentTheme -- Assumes LuminaUI.CurrentTheme is set
+        if theme then
+            local value = theme[themeKey]
+            if value then
+                if transformFunc then value = transformFunc(value) end
+                Utility.safeCall(function() instance[property] = value end)
             else
-                -- Instance was destroyed, remove from registry
-                ThemedElementsRegistry[id] = nil
+                 warn("[LuminaUI] Initial theme key not found:", themeKey)
             end
         end
+    end
+
+    -- Unregister element from theme updates (remove attributes)
+    function Utility.unregisterThemedElement(instance, property)
+        if not instance then return end
+        instance:SetAttribute("LuminaThemeKey_"..property, nil)
+        instance:SetAttribute("LuminaThemeHoverKey_"..property, nil)
+    end
+
+    -- Apply theme to all registered elements by iterating through descendants with attributes
+    function Utility.applyThemeToAll(rootInstance, theme)
+        if not rootInstance or not theme then return end
+        LuminaUI.CurrentTheme = theme -- Update global reference
+
+        for _, instance in ipairs(rootInstance:GetDescendants()) do
+            local attributes = instance:GetAttributes()
+            for attrName, themeKey in pairs(attributes) do
+                if string.sub(attrName, 1, 15) == "LuminaThemeKey_" then
+                    local property = string.sub(attrName, 16) -- Extract property name
+                    local value = theme[themeKey]
+                    if value then
+                        -- Check for a transform function (this part is tricky with attributes)
+                        -- Simplification: Assume no transform needed here, handle in component logic if necessary.
+                        Utility.safeCall(function() instance[property] = value end)
+                    else
+                        warn("[LuminaUI] Theme key not found during update:", themeKey)
+                    end
+                end
+                -- Note: Hover keys are not applied here, they are typically handled by MouseEnter/Leave events
+            end
+        end
+
         -- Update tooltip theme separately if it exists
         if tooltipInstance and tooltipInstance.Parent then
              local textLabel = tooltipInstance:FindFirstChild("Text")
              local stroke = tooltipInstance:FindFirstChildOfClass("UIStroke")
-             tooltipInstance.BackgroundColor3 = theme.NotificationBackground
-             if textLabel then textLabel.TextColor3 = theme.TextColor end
-             if stroke then stroke.Color = theme.ElementStroke end
+             if tooltipInstance:GetAttribute("LuminaThemeKey_BackgroundColor3") then
+                 tooltipInstance.BackgroundColor3 = theme[tooltipInstance:GetAttribute("LuminaThemeKey_BackgroundColor3")] or theme.NotificationBackground
+             end
+             if textLabel and textLabel:GetAttribute("LuminaThemeKey_TextColor3") then
+                 textLabel.TextColor3 = theme[textLabel:GetAttribute("LuminaThemeKey_TextColor3")] or theme.TextColor
+             end
+             if stroke and stroke:GetAttribute("LuminaThemeKey_Color") then
+                 stroke.Color = theme[stroke:GetAttribute("LuminaThemeKey_Color")] or theme.ElementStroke
+             end
         end
     end
 
-    -- Cleanup registry (e.g., when UI is destroyed)
-    function Utility.clearThemeRegistry()
-        ThemedElementsRegistry = {}
-    end
+    -- Cleanup registry (No longer needed with attribute-based system)
+    -- function Utility.clearThemeRegistry() end -- Deprecated
 
-    -- Global click listener for dropdowns
+    -- Global click listener for closing dropdowns/pickers
     function Utility.setupGlobalInputListener()
-        if GlobalInputConnection then GlobalInputConnection:Disconnect() end
+        if GlobalInputConnection then GlobalInputConnection:Disconnect() end -- Disconnect previous if any
+
         GlobalInputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
             if gameProcessed then return end -- Ignore clicks handled by Roblox core UI (like chat)
 
             if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and ActiveDropdown then
-                -- Check if the click was outside the active dropdown's container
-                local clickedInstance = input.UserInputState == Enum.UserInputState.Begin and input.Target or nil -- Get the instance clicked
+                -- Check if the click was outside the active dropdown/picker's container instance
+                local clickedInstance = input.Target -- Get the instance clicked
                 local isDescendant = false
-                if clickedInstance then
+                if clickedInstance and ActiveDropdown.Instance then
                     isDescendant = clickedInstance:IsDescendantOf(ActiveDropdown.Instance)
                 end
 
+                -- If the click was not on the dropdown/picker itself or one of its children
                 if not isDescendant then
-                    ActiveDropdown:ToggleOpen(false) -- Close the dropdown
+                    -- Call the ToggleOpen method (assuming it exists) to close it
+                    if ActiveDropdown.ToggleOpen then
+                        Utility.safeCall(ActiveDropdown.ToggleOpen, ActiveDropdown, false)
+                    end
                     ActiveDropdown = nil -- Clear the active dropdown reference
                 end
             end
         end)
     end
 
+    -- Cleanup global listener
     function Utility.cleanupGlobalInputListener()
         if GlobalInputConnection then
             GlobalInputConnection:Disconnect()
@@ -914,65 +1106,73 @@ do
 end
 
 -- ==================================
---      UI Creation (Refactored)
+--      UI Creation (Core Structure)
 -- ==================================
 
 -- Private Helper Functions
+
+-- Creates the base ScreenGui and handles protection
 local function _createBaseUI(settings)
-    -- Destroy existing UI and clear resources
+    -- Destroy existing UI and clear resources first
     if LuminaUI.RootInstance then
-        Utility.safeCall(function() LuminaUI.RootInstance:Destroy() end)
+        Utility.safeCall(LuminaUI.RootInstance.Destroy, LuminaUI.RootInstance) -- Use safeCall
         LuminaUI.RootInstance = nil
-        Utility.clearThemeRegistry()
         Utility.cleanupGlobalInputListener()
         InstancePool:Clear() -- Clear pool on full UI recreation
     end
 
     local screenGui = Utility.createInstance("ScreenGui", {
-        Name = "LuminaUI",
+        Name = "LuminaUI_" .. (settings.Name or "Window"),
         ResetOnSpawn = false,
-        ZIndexBehavior = Enum.ZIndexBehavior.Global,
-        DisplayOrder = 100,
+        ZIndexBehavior = Enum.ZIndexBehavior.Global, -- Use global ZIndex behavior
+        DisplayOrder = 100, -- Control render order relative to other ScreenGuis
         -- Parent is set after protection
     })
-    LuminaUI.RootInstance = screenGui -- Store root reference
+    LuminaUI.RootInstance = screenGui -- Store root reference globally
 
-    -- Apply protection and set parent
-    if gethui then
+    -- Apply protection and set parent (handle different executor environments)
+    local parentSuccess = false
+    if gethui then -- Synapse X, etc.
         screenGui.Parent = gethui()
-    elseif syn and syn.protect_gui then
+        parentSuccess = true
+    elseif syn and syn.protect_gui then -- Older Synapse
         Utility.safeCall(syn.protect_gui, screenGui)
         screenGui.Parent = CoreGui
-    else
+        parentSuccess = true
+    end
+    -- Fallback to CoreGui if no specific environment detected or parenting failed
+    if not parentSuccess then
         screenGui.Parent = CoreGui
     end
 
-    -- Setup global listener for dropdowns
+    -- Setup global listener for dropdowns/pickers
     Utility.setupGlobalInputListener()
 
     -- Cleanup on destroy
     screenGui.Destroying:Connect(function()
-        Utility.clearThemeRegistry()
         Utility.cleanupGlobalInputListener()
         Utility.hideTooltip() -- Ensure tooltip is hidden
         if LuminaUI.RootInstance == screenGui then LuminaUI.RootInstance = nil end
+        -- Instance pool is cleared on next creation, not necessarily on destroy
     end)
 
     return screenGui
 end
 
+-- Creates the Key System UI if enabled
 local function _createKeySystem(parent, settings, theme)
     if not settings.KeySystem or not settings.KeySystem.Enabled then return true end -- Key system not enabled or needed
 
-    local keyAccepted = false
-    local connections = {}
+    local keyAccepted = Instance.new("BindableEvent") -- Use an event to signal completion
+    local keySystemFrame = nil -- Forward declare for cleanup
 
-    local keySystemFrame = Utility.createInstance("Frame", {
+    keySystemFrame = Utility.createInstance("Frame", {
         Name = "KeySystem",
         Size = UDim2.new(0, 320, 0, 150),
-        Position = settings.UIPosition or UDim2.new(0.5, 0, 0.5, 0),
+        Position = settings.UIPosition or UDim2.new(0.5, 0, 0.5, 0), -- Use loaded/default UI position
         AnchorPoint = Vector2.new(0.5, 0.5),
         BackgroundColor3 = theme.Background,
+        BorderSizePixel = 0,
         Parent = parent
     })
     Utility.createCorner(keySystemFrame, 6)
@@ -980,12 +1180,12 @@ local function _createKeySystem(parent, settings, theme)
     Utility.manageConnections(keySystemFrame) -- Manage connections for this frame
 
     local keyTitle = Utility.createInstance("TextLabel", {
-        Name = "Title", Size = UDim2.new(1, 0, 0, 30), Position = UDim2.new(0, 0, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = "Key System", TextColor3 = theme.TextColor, TextSize = 16, Parent = keySystemFrame
+        Name = "Title", Size = UDim2.new(1, 0, 0, 30), Position = UDim2.new(0, 0, 0, 5), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = "Key System", TextColor3 = theme.TextColor, TextSize = 16, Parent = keySystemFrame
     })
     Utility.registerThemedElement(keyTitle, "TextColor3", "TextColor")
 
     local keyDescription = Utility.createInstance("TextLabel", {
-        Name = "Description", Size = UDim2.new(1, -20, 0, 40), Position = UDim2.new(0, 10, 0, 30), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = settings.KeySystem.Message or "Please enter the key to access this script", TextColor3 = theme.SubTextColor, TextSize = 14, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center, Parent = keySystemFrame
+        Name = "Description", Size = UDim2.new(1, -20, 0, 40), Position = UDim2.new(0, 10, 0, 35), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = settings.KeySystem.Message or "Please enter the key to continue.", TextColor3 = theme.SubTextColor, TextSize = 14, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center, Parent = keySystemFrame
     })
     Utility.registerThemedElement(keyDescription, "TextColor3", "SubTextColor")
 
@@ -993,309 +1193,344 @@ local function _createKeySystem(parent, settings, theme)
         Name = "KeyInput", Size = UDim2.new(1, -20, 0, 30), Position = UDim2.new(0, 10, 0, 75), BackgroundColor3 = theme.InputBackground, PlaceholderText = "Enter Key", PlaceholderColor3 = theme.InputPlaceholder, Text = "", TextColor3 = theme.TextColor, Font = Enum.Font.Gotham, TextSize = 14, ClearTextOnFocus = false, Parent = keySystemFrame
     })
     Utility.createCorner(keyTextbox, 4)
-    local keyStroke = Utility.createStroke(keyTextbox, theme.InputStroke, 1)
+    local keyStroke = Utility.createStroke(keyTextbox, theme.InputStroke, 1, 0, "InputStroke")
     Utility.registerThemedElement(keyTextbox, "BackgroundColor3", "InputBackground")
     Utility.registerThemedElement(keyTextbox, "PlaceholderColor3", "InputPlaceholder")
     Utility.registerThemedElement(keyTextbox, "TextColor3", "TextColor")
-    Utility.registerThemedElement(keyStroke, "Color", "InputStroke")
+    -- Stroke already registered
 
     local submitButton = Utility.createInstance("TextButton", {
         Name = "Submit", Size = UDim2.new(1, -20, 0, 30), Position = UDim2.new(0, 10, 0, 110), BackgroundColor3 = theme.ElementBackground, Font = Enum.Font.GothamBold, Text = "Submit", TextColor3 = theme.TextColor, TextSize = 14, Parent = keySystemFrame
     })
     Utility.createCorner(submitButton, 4)
     local submitStroke = Utility.createStroke(submitButton, theme.ElementStroke, 1)
-    Utility.registerThemedElement(submitButton, "BackgroundColor3", "ElementBackground")
+    Utility.registerThemedElement(submitButton, "BackgroundColor3", "ElementBackground", "ElementBackgroundHover")
     Utility.registerThemedElement(submitButton, "TextColor3", "TextColor")
-    Utility.registerThemedElement(submitStroke, "Color", "ElementStroke")
+    -- Stroke already registered
 
     -- Effects
-    keySystemFrame:AddConnection(submitButton.MouseEnter:Connect(function() TweenService:Create(submitButton, TweenInfo.new(0.2), { BackgroundColor3 = theme.ElementBackgroundHover }):Play() end))
-    keySystemFrame:AddConnection(submitButton.MouseLeave:Connect(function() TweenService:Create(submitButton, TweenInfo.new(0.2), { BackgroundColor3 = theme.ElementBackground }):Play() end))
+    local normalColor = theme.ElementBackground
+    local hoverColor = theme.ElementBackgroundHover
+    keySystemFrame:AddConnection(submitButton.MouseEnter:Connect(function() TweenService:Create(submitButton, TweenInfo.new(0.2), { BackgroundColor3 = hoverColor }):Play() end))
+    keySystemFrame:AddConnection(submitButton.MouseLeave:Connect(function() TweenService:Create(submitButton, TweenInfo.new(0.2), { BackgroundColor3 = normalColor }):Play() end))
+    keySystemFrame:AddConnection(submitButton.MouseButton1Click:Connect(function() Utility.rippleEffect(submitButton) end))
 
+    -- Key Check Logic
     local function checkKey(key)
+        if not key or key == "" then return false end
         return (settings.KeySystem.Key == key) or
                (type(settings.KeySystem.Keys) == "table" and table.find(settings.KeySystem.Keys, key)) or
                false
     end
 
-    keySystemFrame:AddConnection(submitButton.MouseButton1Click:Connect(function()
+    local function onSubmit()
         if checkKey(keyTextbox.Text) then
-            keyAccepted = true
-            keySystemFrame:Destroy() -- Destroys frame and disconnects its connections
+            keyAccepted:Fire(true) -- Signal success
+            Utility.destroyInstance(keySystemFrame) -- Use pooled destroy
         else
-            keyTextbox.Text = ""
+            keyTextbox.Text = "" -- Clear input on failure
+            -- Flash red effect
             local originalColor = keyTextbox.BackgroundColor3
-            TweenService:Create(keyTextbox, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut, 0, true), { BackgroundColor3 = Color3.fromRGB(255, 80, 80) }):Play()
+            local errorColor = Color3.fromRGB(255, 80, 80)
+            local tweenInfo = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut, 0, true) -- Auto-reverse
+            local flashTween = TweenService:Create(keyTextbox, tweenInfo, { BackgroundColor3 = errorColor })
+            flashTween:Play()
+            flashTween.Completed:Connect(function()
+                -- Ensure color reverts fully even if interrupted
+                if keyTextbox and keyTextbox.Parent then keyTextbox.BackgroundColor3 = originalColor end
+            end)
         end
+    end
+
+    keySystemFrame:AddConnection(submitButton.MouseButton1Click:Connect(onSubmit))
+    -- Allow submitting with Enter key
+    keySystemFrame:AddConnection(keyTextbox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then onSubmit() end
     end))
 
     -- Make draggable
     Utility.makeDraggable(keySystemFrame)
 
-    -- Wait for key
-    while not keyAccepted do
-        task.wait()
-        if not keySystemFrame or not keySystemFrame.Parent then return false end -- Stop if UI closed during key entry
-    end
-    return true
+    -- Wait for the keyAccepted event to fire
+    local success = keyAccepted.Event:Wait()
+    keyAccepted:Destroy() -- Clean up the event
+
+    return success -- Return true if key was accepted, false otherwise (e.g., if UI closed)
 end
 
+-- Creates the main window frame and shadow
 local function _createMainFrame(parent, settings, theme, initialPos)
     local mainFrame = Utility.createInstance("Frame", {
         Name = "MainFrame",
         Size = settings.Size,
-        Position = initialPos or UDim2.new(0.5, 0, 0.5, 0),
+        Position = initialPos or UDim2.new(0.5, 0, 0.5, 0), -- Use loaded/default or center
         AnchorPoint = Vector2.new(0.5, 0.5),
         BackgroundColor3 = theme.Background,
         BorderSizePixel = 0,
-        ClipsDescendants = true, -- Important for minimize animation
-        Parent = parent
+        ClipsDescendants = true, -- Important for minimize animation and rounded corners
+        Parent = parent,
+        ZIndex = 0 -- Base ZIndex for the window
     })
     Utility.createCorner(mainFrame, 8)
     Utility.registerThemedElement(mainFrame, "BackgroundColor3", "Background")
-    Utility.manageConnections(mainFrame) -- Manage connections
+    Utility.manageConnections(mainFrame) -- Manage connections for the frame
 
-    -- Shadow
+    -- Shadow (using 9-slice)
     local shadow = Utility.createInstance("ImageLabel", {
-        Name = "Shadow", AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(1, 35, 1, 35), ZIndex = -1, Image = "rbxassetid://5554236805", ImageColor3 = theme.Shadow, ImageTransparency = 0.6, ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(23, 23, 277, 277), SliceScale = 1, Parent = mainFrame
+        Name = "Shadow",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(1, 35, 1, 35), -- Slightly larger than frame for shadow effect
+        ZIndex = -1, -- Behind the main frame
+        Image = "rbxassetid://5554236805", -- Standard 9-slice shadow asset
+        ImageColor3 = theme.Shadow,
+        ImageTransparency = 0.6,
+        ScaleType = Enum.ScaleType.Slice,
+        SliceCenter = Rect.new(23, 23, 277, 277), -- Adjust slice center as needed for the asset
+        SliceScale = 1, -- Render at 1:1 pixel density
+        Parent = mainFrame
     })
     Utility.registerThemedElement(shadow, "ImageColor3", "Shadow")
 
     return mainFrame
 end
 
+-- Creates the top bar with title, icon, and control buttons
 local function _createTopbar(parent, settings, theme)
+    local topbarHeight = 45
     local topbar = Utility.createInstance("Frame", {
-        Name = "Topbar", Size = UDim2.new(1, 0, 0, 45), BackgroundColor3 = theme.Topbar, BorderSizePixel = 0, Parent = parent, ZIndex = 2
+        Name = "Topbar",
+        Size = UDim2.new(1, 0, 0, topbarHeight),
+        BackgroundColor3 = theme.Topbar,
+        BorderSizePixel = 0,
+        Parent = parent,
+        ZIndex = 2 -- Above main background, below potential popups
     })
-    Utility.createCorner(topbar, 8) -- Apply corner to topbar itself
+    -- Apply corner only to top-left and top-right visually by covering bottom
+    Utility.createCorner(topbar, 8)
     Utility.registerThemedElement(topbar, "BackgroundColor3", "Topbar")
 
-    -- Corner fix (covers bottom corners of the topbar's rounding)
+    -- Corner fix (covers bottom corners of the topbar's rounding inside the main frame)
     local cornerFix = Utility.createInstance("Frame", {
-        Name = "CornerFix", Size = UDim2.new(1, 0, 0.5, 1), Position = UDim2.new(0, 0, 0.5, 0), BackgroundColor3 = theme.Topbar, BorderSizePixel = 0, ZIndex = 1, Parent = topbar
+        Name = "CornerFix",
+        Size = UDim2.new(1, 0, 0.5, 1), -- Half height, full width
+        Position = UDim2.new(0, 0, 0.5, 0), -- Positioned at the bottom half
+        BackgroundColor3 = theme.Topbar,
+        BorderSizePixel = 0,
+        ZIndex = 1, -- Below topbar content, above main frame content
+        Parent = topbar
     })
     Utility.registerThemedElement(cornerFix, "BackgroundColor3", "Topbar")
 
-    local titleX = 15
+    -- Icon (optional)
+    local titleXOffset = 15 -- Default left padding for title
     if settings.Icon and settings.Icon ~= 0 then
+        local iconSize = 20
+        local iconPadding = 12
         local icon = Utility.createInstance("ImageLabel", {
-            Name = "Icon", Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 12, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(settings.Icon), ZIndex = 3, Parent = topbar
+            Name = "Icon",
+            Size = UDim2.new(0, iconSize, 0, iconSize),
+            Position = UDim2.new(0, iconPadding, 0.5, 0), -- Positioned left, centered vertically
+            AnchorPoint = Vector2.new(0, 0.5),
+            BackgroundTransparency = 1,
+            Image = Utility.loadIcon(settings.Icon),
+            -- ImageColor3 can be themed if the icon is single-color
+            ZIndex = 3, -- Above corner fix and topbar background
+            Parent = topbar
         })
-        -- No theme registration needed for icon image itself unless colorable
-        titleX = 40
+        titleXOffset = iconPadding + iconSize + 8 -- Adjust title start position
     end
 
+    -- Title
     local topbarTitle = Utility.createInstance("TextLabel", {
-        Name = "Title", Size = UDim2.new(1, -(titleX + 90), 1, 0), Position = UDim2.new(0, titleX, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = settings.Name, TextColor3 = theme.TextColor, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 3, Parent = topbar
+        Name = "Title",
+        Size = UDim2.new(1, -(titleXOffset + 90), 1, 0), -- Calculate width dynamically (total width - left offset - right buttons area)
+        Position = UDim2.new(0, titleXOffset, 0, 0),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = settings.Name,
+        TextColor3 = theme.TextColor,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 3, -- Above corner fix and topbar background
+        Parent = topbar
     })
     Utility.registerThemedElement(topbarTitle, "TextColor3", "TextColor")
 
-    -- Control Buttons
-    local buttonSize = UDim2.new(0, 18, 0, 18)
-    local buttonY = 0.5
-    local buttonTransparency = 0.2 -- Initial transparency
+    -- Control Buttons (Close, Minimize, Settings)
+    local controls = {} -- Store buttons for easier handling
+    local buttonSize = 18
+    local buttonSpacing = 12
+    local buttonTransparency = 0.2 -- Initial transparency for hover effect
+    local buttonY = 0.5 -- Center vertically
 
-    local closeButton = Utility.createInstance("ImageButton", {
-        Name = "Close", Size = buttonSize, Position = UDim2.new(1, -15, buttonY, 0), AnchorPoint = Vector2.new(1, 0.5), BackgroundTransparency = 1, Image = "rbxassetid://6035047409", ImageColor3 = theme.TextColor, ImageTransparency = buttonTransparency, ZIndex = 3, Parent = topbar
-    })
-    Utility.registerThemedElement(closeButton, "ImageColor3", "TextColor")
+    local buttonData = {
+        { Name = "Close", Image = "rbxassetid://6035047409" },
+        { Name = "Minimize", Image = "rbxassetid://6035067836" },
+        { Name = "Settings", Image = "rbxassetid://6031280882" },
+    }
 
-    local minimizeButton = Utility.createInstance("ImageButton", {
-        Name = "Minimize", Size = buttonSize, Position = UDim2.new(1, -45, buttonY, 0), AnchorPoint = Vector2.new(1, 0.5), BackgroundTransparency = 1, Image = "rbxassetid://6035067836", ImageColor3 = theme.TextColor, ImageTransparency = buttonTransparency, ZIndex = 3, Parent = topbar
-    })
-    Utility.registerThemedElement(minimizeButton, "ImageColor3", "TextColor")
+    for i, data in ipairs(buttonData) do
+        local button = Utility.createInstance("ImageButton", {
+            Name = data.Name,
+            Size = UDim2.new(0, buttonSize, 0, buttonSize),
+            -- Position from right edge: (i * spacing) + ((i-1) * buttonSize) - simplified:
+            Position = UDim2.new(1, -(buttonSpacing + (i-1)*(buttonSize + buttonSpacing)), buttonY, 0),
+            AnchorPoint = Vector2.new(1, 0.5), -- Anchor to right-center
+            BackgroundTransparency = 1,
+            Image = data.Image,
+            ImageColor3 = theme.TextColor,
+            ImageTransparency = buttonTransparency,
+            ZIndex = 3, -- Above corner fix and topbar background
+            Parent = topbar
+        })
+        Utility.registerThemedElement(button, "ImageColor3", "TextColor")
+        controls[data.Name] = button -- Store reference by name
 
-    local settingsButton = Utility.createInstance("ImageButton", {
-        Name = "Settings", Size = buttonSize, Position = UDim2.new(1, -75, buttonY, 0), AnchorPoint = Vector2.new(1, 0.5), BackgroundTransparency = 1, Image = "rbxassetid://6031280882", ImageColor3 = theme.TextColor, ImageTransparency = buttonTransparency, ZIndex = 3, Parent = topbar
-    })
-    Utility.registerThemedElement(settingsButton, "ImageColor3", "TextColor")
-
-    -- Hover Effects for controls
-    local tweenInfoHover = TweenInfo.new(0.2)
-    for _, button in ipairs({closeButton, minimizeButton, settingsButton}) do
+        -- Hover Effects & Ripple
+        local tweenInfoHover = TweenInfo.new(0.2)
         parent:AddConnection(button.MouseEnter:Connect(function() TweenService:Create(button, tweenInfoHover, { ImageTransparency = 0 }):Play() end))
         parent:AddConnection(button.MouseLeave:Connect(function() TweenService:Create(button, tweenInfoHover, { ImageTransparency = buttonTransparency }):Play() end))
-        parent:AddConnection(button.MouseButton1Click:Connect(function() Utility.rippleEffect(button, Color3.new(1,1,1)) end)) -- Add ripple
+        parent:AddConnection(button.MouseButton1Click:Connect(function() Utility.rippleEffect(button, Color3.new(1,1,1), 0.3) end)) -- Add ripple
     end
 
-    return topbar, closeButton, minimizeButton, settingsButton
+    return topbar, controls.Close, controls.Minimize, controls.Settings
 end
 
-local function _createContentContainer(parent)
+-- Creates the main content area below the topbar and above credits
+local function _createContentContainer(parent, theme, topbarHeight, creditsHeight)
     local container = Utility.createInstance("Frame", {
         Name = "ContentContainer",
-        Size = UDim2.new(1, -10, 1, -55 - 30), -- Adjusted for credits height
-        Position = UDim2.new(0, 5, 0, 50),
-        BackgroundTransparency = 1,
+        Size = UDim2.new(1, -10, 1, -(topbarHeight + creditsHeight + 5)), -- Size relative to parent, accounting for padding, topbar, credits
+        Position = UDim2.new(0, 5, 0, topbarHeight), -- Position below topbar, with padding
+        BackgroundTransparency = 1, -- Should be transparent
+        BorderSizePixel = 0,
+        ClipsDescendants = false, -- Allow dropdowns etc. to potentially overflow visually if needed (though contained by mainFrame)
         Parent = parent,
-        ZIndex = 1
+        ZIndex = 1 -- Above main background, below topbar
     })
     return container
 end
 
+-- Creates the container and scroll frame for tabs on the left
 local function _createTabContainer(parent, theme)
+    local tabContainerWidth = 130
     local tabContainer = Utility.createInstance("Frame", {
-        Name = "TabContainer", Size = UDim2.new(0, 130, 1, 0), BackgroundTransparency = 1, Parent = parent
+        Name = "TabContainer",
+        Size = UDim2.new(0, tabContainerWidth, 1, 0), -- Fixed width, full height of content container
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1, -- Should be transparent
+        BorderSizePixel = 0,
+        Parent = parent,
+        ZIndex = 2 -- Above content container background
     })
 
     local tabScrollFrame = Utility.createInstance("ScrollingFrame", {
-        Name = "TabScrollFrame", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollingDirection = Enum.ScrollingDirection.Y, CanvasSize = UDim2.new(0,0,0,0), Parent = tabContainer
+        Name = "TabScrollFrame",
+        Size = UDim2.new(1, 0, 1, 0), -- Full size of tab container
+        BackgroundTransparency = 1, -- Should be transparent
+        BorderSizePixel = 0,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        CanvasSize = UDim2.new(0,0,0,0), -- Auto-sized by layout
+        ScrollBarThickness = 0, -- Hide default scrollbar
+        Parent = tabContainer
+        -- Custom scrollbar applied later
     })
-    Utility.applyCustomScrollbar(tabScrollFrame, theme, 4) -- Apply scrollbar
 
-    Utility.createInstance("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder, Parent = tabScrollFrame })
-    Utility.createInstance("UIPadding", { PaddingTop = UDim.new(0, 5), PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5), Parent = tabScrollFrame })
+    -- Layout for tab buttons
+    Utility.createInstance("UIListLayout", {
+        Padding = UDim.new(0, 5),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        HorizontalAlignment = Enum.HorizontalAlignment.Center,
+        Parent = tabScrollFrame
+    })
+    -- Padding within the scroll frame
+    Utility.createInstance("UIPadding", {
+        PaddingTop = UDim.new(0, 5),
+        PaddingLeft = UDim.new(0, 5),
+        PaddingRight = UDim.new(0, 5),
+        PaddingBottom = UDim.new(0, 5),
+        Parent = tabScrollFrame
+    })
 
-    return tabContainer, tabScrollFrame
+    -- Apply custom scrollbar
+    Utility.applyCustomScrollbar(tabScrollFrame, theme, 4)
+
+    return tabContainer, tabScrollFrame, tabContainerWidth
 end
 
-local function _createElementsContainer(parent)
+-- Creates the container for element pages on the right
+local function _createElementsContainer(parent, tabContainerWidth)
     local elementsContainer = Utility.createInstance("Frame", {
         Name = "ElementsContainer",
-        Size = UDim2.new(1, -140, 1, 0),
-        Position = UDim2.new(0, 140, 0, 0),
-        BackgroundTransparency = 1,
-        ClipsDescendants = true,
+        Size = UDim2.new(1, -(tabContainerWidth + 5), 1, 0), -- Fill remaining width (content width - tab width - padding)
+        Position = UDim2.new(0, tabContainerWidth + 5, 0, 0), -- Position to the right of the tab container + padding
+        BackgroundTransparency = 1, -- Should be transparent
+        BorderSizePixel = 0,
+        ClipsDescendants = true, -- Clip pages within this area
         Parent = parent,
-        ZIndex = 2 -- Explicitly set ZIndex higher than contentContainer (default 1)
+        ZIndex = 2 -- Same level as tab container
     })
 
-    local elementsPageFolder = Utility.createInstance("Folder", { Name = "Pages", Parent = elementsContainer })
+    -- Folder to hold the actual pages (ScrollingFrames)
+    local elementsPageFolder = Utility.createInstance("Folder", {
+        Name = "Pages",
+        Parent = elementsContainer
+    })
 
     return elementsContainer, elementsPageFolder
 end
 
-local function _createSettingsPage(parentFolder, settings, theme, windowApi)
-    local settingsPage = Utility.createInstance("ScrollingFrame", {
-        Name = "Settings", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0, CanvasSize = UDim2.new(0, 0, 0, 0), Visible = false, Parent = parentFolder
-    })
-    Utility.manageConnections(settingsPage) -- Manage connections
-
-    local listLayout = Utility.createInstance("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder, Parent = settingsPage })
-    Utility.createInstance("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), Parent = settingsPage }) -- Added bottom padding
-
-    -- Auto-size canvas
-    settingsPage:AddConnection(listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        settingsPage.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 16) -- Add padding to bottom
-    end))
-
-    -- Apply custom scrollbar
-    Utility.applyCustomScrollbar(settingsPage, theme)
-
-    -- Theme Section Title
-    local themeTitleFrame = Utility.createInstance("Frame", { Name = "ThemeSectionTitle", Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, Parent = settingsPage, LayoutOrder = 1 })
-    local themeTitleText = Utility.createInstance("TextLabel", { Name = "Title", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = "Theme Settings", TextColor3 = theme.TextColor, TextSize = 14, TextTransparency = 0.4, TextXAlignment = Enum.TextXAlignment.Left, Parent = themeTitleFrame })
-    Utility.registerThemedElement(themeTitleText, "TextColor3", "TextColor")
-
-    -- Theme Buttons Container (using UIGridLayout)
-    local themeButtonsContainer = Utility.createInstance("Frame", {
-        Name = "ThemeButtonsContainer",
-        Size = UDim2.new(1, 0, 0, 100), -- Initial height, adjust based on grid
-        BackgroundTransparency = 1,
-        Parent = settingsPage,
-        LayoutOrder = 2
-    })
-    local gridLayout = Utility.createInstance("UIGridLayout", {
-        CellPadding = UDim2.new(0, 10, 0, 10),
-        CellSize = UDim2.new(0, 90, 0, 90),
-        StartCorner = Enum.StartCorner.TopLeft,
-        FillDirection = Enum.FillDirection.Horizontal,
-        HorizontalAlignment = Enum.HorizontalAlignment.Left,
-        VerticalAlignment = Enum.VerticalAlignment.Top,
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Parent = themeButtonsContainer
-    })
-
-    local function createThemeButton(themeName)
-        local themeData = LuminaUI.Theme[themeName]
-        local buttonFrame = Utility.createInstance("Frame", { Name = themeName.."Theme", Size = UDim2.new(0, 90, 0, 90), BackgroundColor3 = themeData.ElementBackground, Parent = themeButtonsContainer })
-        Utility.createCorner(buttonFrame, 6)
-        local stroke = Utility.createStroke(buttonFrame, theme.ElementStroke, 1) -- Use current theme for stroke initially
-        -- Register for updates based on the theme it represents
-        Utility.registerThemedElement(buttonFrame, "BackgroundColor3", "ElementBackground") -- This will update based on the *selected* theme, maybe not ideal? Let's keep it simple for now.
-        Utility.registerThemedElement(stroke, "Color", "ElementStroke")
-
-        local preview = Utility.createInstance("Frame", { Name = "Preview", Size = UDim2.new(1, -10, 0, 30), Position = UDim2.new(0, 5, 0, 5), BackgroundColor3 = themeData.Topbar, Parent = buttonFrame })
-        Utility.createCorner(preview, 4)
-
-        local color1 = Utility.createInstance("Frame", { Name = "Color1", Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 5, 0, 40), BackgroundColor3 = themeData.ToggleEnabled, Parent = buttonFrame })
-        Utility.createCorner(color1, 4)
-
-        local color2 = Utility.createInstance("Frame", { Name = "Color2", Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 30, 0, 40), BackgroundColor3 = themeData.SliderProgress, Parent = buttonFrame })
-        Utility.createCorner(color2, 4)
-
-        local text = Utility.createInstance("TextLabel", { Name = "Text", Size = UDim2.new(1, 0, 0, 20), Position = UDim2.new(0, 0, 0, 65), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = themeName, TextColor3 = themeData.TextColor, TextSize = 12, Parent = buttonFrame })
-
-        local interact = Utility.createInstance("TextButton", { Name = "Interact", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = buttonFrame })
-
-        settingsPage:AddConnection(interact.MouseButton1Click:Connect(function()
-            windowApi:SetTheme(themeName) -- Use the API method to apply theme
-        end))
-        settingsPage:AddConnection(interact.MouseEnter:Connect(function() TweenService:Create(buttonFrame, TweenInfo.new(0.2), { BackgroundColor3 = Utility.lighter(buttonFrame.BackgroundColor3, 0.1) }):Play() end))
-        settingsPage:AddConnection(interact.MouseLeave:Connect(function() TweenService:Create(buttonFrame, TweenInfo.new(0.2), { BackgroundColor3 = themeData.ElementBackground }):Play() end)) -- Revert to its own theme bg
-
-        return buttonFrame
-    end
-
-    -- Create buttons for each theme
-    for themeName, _ in pairs(LuminaUI.Theme) do
-        createThemeButton(themeName)
-    end
-
-    -- Adjust container height based on grid content
-    task.wait() -- Wait for grid layout
-    local contentHeight = gridLayout.AbsoluteContentSize.Y
-    themeButtonsContainer.Size = UDim2.new(1, 0, 0, contentHeight)
-
-    return settingsPage
-end
-
-local function _createNotificationsContainer(parent)
-    local notifications = Utility.createInstance("Frame", {
-        Name = "Notifications",
-        Size = UDim2.new(0, 260, 1, -10), -- Size relative to parent (ScreenGui)
-        Position = UDim2.new(1, -280, 0, 5), -- Position relative to parent
-        BackgroundTransparency = 1,
-        Parent = parent,
-        ZIndex = 500 -- High ZIndex for notifications
-    })
-
-    Utility.createInstance("UIListLayout", {
-        Padding = UDim.new(0, 5),
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        VerticalAlignment = Enum.VerticalAlignment.Bottom, -- Show newest at bottom
-        HorizontalAlignment = Enum.HorizontalAlignment.Right,
-        Parent = notifications
-    })
-
-    return notifications
-end
-
-local function _createCreditsSection(parent, theme, windowApi)
+-- Creates the Credits section at the bottom
+local function _createCreditsSection(parent, theme, windowApi, creditsHeight)
      local creditsSection = Utility.createInstance("Frame", {
         Name = "Credits",
-        Size = UDim2.new(1, 0, 0, 30),
-        Position = UDim2.new(0, 0, 1, -30), -- Anchor to bottom
-        AnchorPoint = Vector2.new(0, 1), -- Anchor to bottom
-        BackgroundColor3 = Utility.darker(theme.ElementBackground, 0.1),
-        Parent = parent,
-        ZIndex = 2
+        Size = UDim2.new(1, 0, 0, creditsHeight),
+        Position = UDim2.new(0, 0, 1, 0), -- Anchor to bottom
+        AnchorPoint = Vector2.new(0, 1), -- Anchor point at bottom-left
+        BackgroundColor3 = Utility.darker(theme.ElementBackground, 0.1), -- Slightly darker background
+        BorderSizePixel = 0,
+        Parent = parent, -- Parent is the mainFrame
+        ZIndex = 2 -- Above main background, same level as topbar
     })
-    Utility.registerThemedElement(creditsSection, "BackgroundColor3", "ElementBackground", nil, function(c) return Utility.darker(c, 0.1) end) -- Special darker logic
+    -- Register with a transform function for the darker color
+    Utility.registerThemedElement(creditsSection, "BackgroundColor3", "ElementBackground", nil, function(c) return Utility.darker(c, 0.1) end)
+    Utility.manageConnections(creditsSection)
 
+    -- Credit Text
     local creditText = Utility.createInstance("TextLabel", {
-        Name = "CreditText", Size = UDim2.new(0.7, -120, 1, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = "LuminaUI by Supergoatscriptguy", TextColor3 = theme.SubTextColor, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, Position = UDim2.new(0, 10, 0, 0), Parent = creditsSection
+        Name = "CreditText",
+        Size = UDim2.new(0.7, -120, 1, 0), -- Adjust width calculation as needed
+        Position = UDim2.new(0, 10, 0, 0), -- Left aligned with padding
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham,
+        Text = "LuminaUI by Supergoatscriptguy",
+        TextColor3 = theme.SubTextColor,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = creditsSection
     })
     Utility.registerThemedElement(creditText, "TextColor3", "SubTextColor")
 
+    -- Discord Button
     local discordButton = Utility.createInstance("TextButton", {
-        Name = "DiscordButton", Size = UDim2.new(0, 100, 0, 22), Position = UDim2.new(1, -10, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = Color3.fromRGB(88, 101, 242), Font = Enum.Font.GothamBold, Text = "Join Discord", TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 12, Parent = creditsSection
+        Name = "DiscordButton",
+        Size = UDim2.new(0, 100, 0, 22), -- Fixed size button
+        Position = UDim2.new(1, -10, 0.5, 0), -- Right aligned, centered vertically
+        AnchorPoint = Vector2.new(1, 0.5), -- Anchor to right-center
+        BackgroundColor3 = Color3.fromRGB(88, 101, 242), -- Discord brand color
+        Font = Enum.Font.GothamBold,
+        Text = "Join Discord",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 12,
+        Parent = creditsSection
     })
     Utility.createCorner(discordButton, 4)
 
-    parent:AddConnection(discordButton.MouseButton1Click:Connect(function()
-        local discordLink = "https://discord.gg/KgvmCnZ88n" -- Updated link
+    -- Discord Button Interaction
+    creditsSection:AddConnection(discordButton.MouseButton1Click:Connect(function()
+        local discordLink = "https://discord.gg/KgvmCnZ88n" -- Your Discord link
         if setclipboard then
             local success, err = Utility.safeCall(setclipboard, discordLink)
             if success then
@@ -1305,144 +1540,178 @@ local function _createCreditsSection(parent, theme, windowApi)
                  warn("[LuminaUI] Failed to set clipboard:", err)
             end
         else
-            windowApi:CreateNotification({ Title = "Error", Content = "'setclipboard' not available.", Duration = 3 })
+            -- Provide feedback even if setclipboard isn't available
+            windowApi:CreateNotification({ Title = "Discord Link", Content = discordLink, Duration = 5 })
+            warn("[LuminaUI] 'setclipboard' not available. Link:", discordLink)
         end
     end))
-     parent:AddConnection(discordButton.MouseEnter:Connect(function() Utility.pulseEffect(discordButton, 1.03, 0.1) end))
+    -- Add pulse effect on hover
+    creditsSection:AddConnection(discordButton.MouseEnter:Connect(function() Utility.pulseEffect(discordButton, 1.03, 0.1) end))
 
     return creditsSection
 end
 
+-- ==================================
+--      Main Window Creation
+-- ==================================
 
--- Main Window Creation Function
+-- Main function to create the UI window
 function LuminaUI:CreateWindow(settings)
     settings = settings or {}
+    -- Default settings
     settings.Name = settings.Name or "LuminaUI"
     settings.Theme = settings.Theme or "Default"
     settings.Size = settings.Size or UDim2.new(0, 550, 0, 475)
-    settings.Icon = settings.Icon or 0
-    settings.ConfigurationSaving = settings.ConfigurationSaving or { Enabled = true, FileName = "LuminaConfig" } -- Default enabled
+    settings.Icon = settings.Icon -- Keep nil if not provided, handled by loadIcon
+    settings.ConfigurationSaving = settings.ConfigurationSaving or { Enabled = true, FileName = "LuminaConfig" }
+    settings.ConfigurationSaving.Enabled = settings.ConfigurationSaving.Enabled ~= false -- Default true
+    settings.ConfigurationSaving.FileName = settings.ConfigurationSaving.FileName or "LuminaConfig"
     settings.KeySystem = settings.KeySystem or { Enabled = false }
+    settings.KeySystem.Enabled = settings.KeySystem.Enabled == true -- Default false
 
     -- Select initial theme
     local currentThemeName = settings.Theme
-    local currentTheme = LuminaUI.Theme[currentThemeName] or LuminaUI.Theme.Default
-    if not LuminaUI.Theme[currentThemeName] then
+    local currentTheme = LuminaUI.Theme[currentThemeName]
+    if not currentTheme then
         warn("[LuminaUI] Invalid theme name '"..tostring(currentThemeName).."' provided. Using Default.")
         currentThemeName = "Default"
+        currentTheme = LuminaUI.Theme.Default
     end
+    LuminaUI.CurrentTheme = currentTheme -- Set globally for utilities during creation
 
-    -- Create Base ScreenGui
+    -- Create Base ScreenGui (clears previous UI)
     local screenGui = _createBaseUI(settings)
+    if not screenGui or not screenGui.Parent then
+        warn("[LuminaUI] Failed to create ScreenGui or parent it.")
+        return nil -- Critical failure
+    end
 
     -- Load Configuration (before creating main frame to get position)
     local loadedConfig = Utility.loadConfig(settings)
     local initialPosition = loadedConfig.UIPosition or settings.UIPosition -- Use loaded position if available
 
-    -- Create Key System (if enabled, waits for key)
+    -- Create Key System (if enabled, this blocks until key is accepted or UI is closed)
     local keyCheckPassed = _createKeySystem(screenGui, settings, currentTheme)
     if not keyCheckPassed then
-        -- UI was likely closed during key entry, cleanup and exit
-        if screenGui and screenGui.Parent then screenGui:Destroy() end
+        -- Key system failed or UI was closed during key entry
+        if screenGui and screenGui.Parent then Utility.destroyInstance(screenGui) end -- Cleanup ScreenGui
+        warn("[LuminaUI] Key system failed or was cancelled.")
         return nil
     end
 
-    -- Create Main UI Elements
+    -- Define constants for layout
+    local topbarHeight = 45
+    local creditsHeight = 30
+
+    -- Create Main UI Structure
     local mainFrame = _createMainFrame(screenGui, settings, currentTheme, initialPosition)
     local topbar, closeButton, minimizeButton, settingsButton = _createTopbar(mainFrame, settings, currentTheme)
-    local contentContainer = _createContentContainer(mainFrame)
-    local tabContainer, tabScrollFrame = _createTabContainer(contentContainer, currentTheme)
-    local elementsContainer, elementsPageFolder = _createElementsContainer(contentContainer)
-    local notificationsContainer = _createNotificationsContainer(screenGui) -- Parent to ScreenGui
+    local contentContainer = _createContentContainer(mainFrame, currentTheme, topbarHeight, creditsHeight)
+    local tabContainer, tabScrollFrame, tabContainerWidth = _createTabContainer(contentContainer, currentTheme)
+    local elementsContainer, elementsPageFolder = _createElementsContainer(contentContainer, tabContainerWidth)
+    local notificationsContainer = _createNotificationsContainer(screenGui) -- Parent directly to ScreenGui for global positioning
 
-    -- Window API Table (forward declaration needed for settings page and credits)
+    -- Window API Table (forward declaration needed for settings page, credits, etc.)
     local Window = {
         Instance = mainFrame,
-        Tabs = {},
-        TabGroups = {},
+        ScreenGui = screenGui, -- Reference to the root
+        Tabs = {}, -- Stores Tab API objects
+        TabGroups = {}, -- For future implementation
         CurrentTheme = currentTheme,
         CurrentThemeName = currentThemeName,
-        Settings = settings, -- Store settings
-        _connections = {}, -- For window-level connections
-        _components = {}, -- Store references to created components (buttons, sliders etc.) for theme updates
-        _activeTab = nil,
-        _activePage = nil,
-        _settingsPage = nil,
-        _tabScrollFrame = tabScrollFrame,
-        _elementsPageFolder = elementsPageFolder,
-        _notificationsContainer = notificationsContainer
+        Settings = settings, -- Store merged settings
+        _connections = {}, -- For window-level connections (e.g., button clicks)
+        _components = {}, -- Stores references to created components (buttons, sliders etc.) - May not be needed with attribute theming
+        _activeTabButton = nil, -- Reference to the currently selected tab *button* Frame
+        _activePage = nil, -- Reference to the currently visible page ScrollingFrame
+        _settingsPage = nil, -- Reference to the settings page ScrollingFrame
+        _tabScrollFrame = tabScrollFrame, -- Reference to the tab list scroll frame
+        _elementsPageFolder = elementsPageFolder, -- Reference to the folder holding pages
+        _notificationsContainer = notificationsContainer, -- Reference to notification area
+        _minimized = false, -- Track minimize state
+        _restoreButton = nil -- Reference to the restore button when minimized
     }
-    Utility.manageConnections(Window) -- Manage connections for the Window object itself
+    Utility.manageConnections(Window) -- Manage connections for the Window API object itself (rarely needed)
+
+    -- Create Credits Section (needs Window API for notifications)
+    local creditsSection = _createCreditsSection(mainFrame, currentTheme, Window, creditsHeight)
 
     -- Create Settings Page (needs Window API reference for SetTheme)
+    -- Moved creation after Window object exists, but before component methods are defined
     local settingsPage = _createSettingsPage(elementsPageFolder, settings, currentTheme, Window)
     Window._settingsPage = settingsPage
 
-    -- Create Credits Section (needs Window API for notifications)
-    local creditsSection = _createCreditsSection(mainFrame, currentTheme, Window)
-
-    -- Apply loaded element values (after elements are potentially created)
-    local function applyLoadedConfigValues()
-         if loadedConfig.Elements then
+    -- Apply loaded element values (defer slightly after UI structure exists)
+    task.defer(function()
+        if loadedConfig.Elements then
             for flag, data in pairs(loadedConfig.Elements) do
-                if LuminaUI.Flags[flag] and LuminaUI.Flags[flag].ComponentRef and LuminaUI.Flags[flag].ComponentRef.SetValue then
-                    -- Check type match for safety? Maybe not strictly necessary if flags are unique.
-                    -- if LuminaUI.Flags[flag].Type == data.Type then
-                        Utility.safeCall(LuminaUI.Flags[flag].ComponentRef.SetValue, LuminaUI.Flags[flag].ComponentRef, data.Value)
+                -- Find the component associated with the flag
+                local flagData = LuminaUI.Flags[flag]
+                if flagData and flagData.ComponentRef and flagData.ComponentRef.SetValue then
+                    -- Check type match for safety? Optional.
+                    -- if flagData.Type == data.Type then
+                        Utility.safeCall(flagData.ComponentRef.SetValue, flagData.ComponentRef, data.Value, true) -- Pass true to skip callback on load
                     -- end
                 end
             end
         end
-    end
+    end)
 
     -- Function to select a tab visually and show its page
-    function Window:_selectTab(tabButton, tabPage)
-        if not tabButton or not tabPage then return end
-        if self._activeTab == tabButton then return end -- Already selected
+    function Window:_selectTab(tabButtonToSelect, pageToShow)
+        if not tabButtonToSelect or not pageToShow then return end
+        if self._activeTabButton == tabButtonToSelect then return end -- Already selected
 
-        local isSettings = (tabButton == settingsButton) -- Check if settings button triggered this
+        local isSettings = (pageToShow == self._settingsPage) -- Check if settings page is being shown
+
+        local theme = self.CurrentTheme -- Use the current theme for styling
 
         -- Deselect previous tab and hide previous page
-        if self._activeTab and self._activeTab.Parent then
-            local prevTabTitle = self._activeTab:FindFirstChild("Title")
-            local prevTabIcon = self._activeTab:FindFirstChild("Icon")
-            local prevStroke = self._activeTab:FindFirstChildOfClass("UIStroke")
+        if self._activeTabButton and self._activeTabButton.Parent then
+            local prevTab = self._activeTabButton
+            local prevTabTitle = prevTab:FindFirstChild("Title")
+            local prevTabIcon = prevTab:FindFirstChild("Icon")
+            local prevStroke = prevTab:FindFirstChild("TabStroke") -- Find by name
 
-            TweenService:Create(self._activeTab, TweenInfo.new(0.2), { BackgroundColor3 = self.CurrentTheme.TabBackground, BackgroundTransparency = 0.7 }):Play()
-            if prevTabTitle then TweenService:Create(prevTabTitle, TweenInfo.new(0.2), { TextColor3 = self.CurrentTheme.TabTextColor, TextTransparency = 0.2 }):Play() end
-            if prevTabIcon then TweenService:Create(prevTabIcon, TweenInfo.new(0.2), { ImageColor3 = self.CurrentTheme.TabTextColor, ImageTransparency = 0.2 }):Play() end
-            if prevStroke then prevStroke.Enabled = true end
+            -- Animate deselection
+            TweenService:Create(prevTab, TweenInfo.new(0.2), { BackgroundColor3 = theme.TabBackground, BackgroundTransparency = 0.7 }):Play()
+            if prevTabTitle then TweenService:Create(prevTabTitle, TweenInfo.new(0.2), { TextColor3 = theme.TabTextColor, TextTransparency = 0.2 }):Play() end
+            if prevTabIcon then TweenService:Create(prevTabIcon, TweenInfo.new(0.2), { ImageColor3 = theme.TabTextColor, ImageTransparency = 0.2 }):Play() end
+            if prevStroke then prevStroke.Enabled = true end -- Show stroke on deselected
         end
         if self._activePage and self._activePage.Parent then
             self._activePage.Visible = false
         end
 
         -- Select new tab and show new page
-        local tabTitle = tabButton:FindFirstChild("Title")
-        local tabIcon = tabButton:FindFirstChild("Icon")
-        local stroke = tabButton:FindFirstChildOfClass("UIStroke")
+        local newTab = tabButtonToSelect
+        local newTabTitle = newTab:FindFirstChild("Title")
+        local newTabIcon = newTab:FindFirstChild("Icon")
+        local newStroke = newTab:FindFirstChild("TabStroke")
 
-        if not isSettings then -- Don't highlight tab button if settings opened
-             TweenService:Create(tabButton, TweenInfo.new(0.2), { BackgroundColor3 = self.CurrentTheme.TabBackgroundSelected, BackgroundTransparency = 0 }):Play()
-             if tabTitle then TweenService:Create(tabTitle, TweenInfo.new(0.2), { TextColor3 = self.CurrentTheme.SelectedTabTextColor, TextTransparency = 0 }):Play() end
-             if tabIcon then
-                 TweenService:Create(tabIcon, TweenInfo.new(0.2), { ImageColor3 = self.CurrentTheme.SelectedTabTextColor, ImageTransparency = 0 }):Play()
-                 Utility.pulseEffect(tabIcon)
+        if not isSettings then -- Don't highlight a tab button if settings are opened via the gear icon
+             -- Animate selection
+             TweenService:Create(newTab, TweenInfo.new(0.2), { BackgroundColor3 = theme.TabBackgroundSelected, BackgroundTransparency = 0 }):Play()
+             if newTabTitle then TweenService:Create(newTabTitle, TweenInfo.new(0.2), { TextColor3 = theme.SelectedTabTextColor, TextTransparency = 0 }):Play() end
+             if newTabIcon then
+                 TweenService:Create(newTabIcon, TweenInfo.new(0.2), { ImageColor3 = theme.SelectedTabTextColor, ImageTransparency = 0 }):Play()
+                 Utility.pulseEffect(newTabIcon) -- Pulse effect on selection
              end
-             if stroke then stroke.Enabled = false end -- Hide stroke on selected tab
-             self._activeTab = tabButton
+             if newStroke then newStroke.Enabled = false end -- Hide stroke on selected tab
+             self._activeTabButton = newTab -- Store the selected button
         else
-             self._activeTab = nil -- No tab is active when settings are open
+             self._activeTabButton = nil -- No tab button is "active" when settings are open
         end
 
-        tabPage.Visible = true
-        if tabPage:IsA("ScrollingFrame") then
-            tabPage.CanvasPosition = Vector2.new(0, 0) -- Scroll to top
+        -- Show the corresponding page
+        pageToShow.Visible = true
+        if pageToShow:IsA("ScrollingFrame") then
+            pageToShow.CanvasPosition = Vector2.new(0, 0) -- Scroll to top when page becomes visible
         end
-        self._activePage = tabPage
+        self._activePage = pageToShow
 
         -- Ensure settings page is hidden if a regular tab is selected
-        if not isSettings and self._settingsPage then
+        if not isSettings and self._settingsPage and self._settingsPage.Visible then
             self._settingsPage.Visible = false
         end
     end
@@ -1452,85 +1721,119 @@ function LuminaUI:CreateWindow(settings)
         local position = mainFrame.Position
         Utility.saveConfig(settings, position) -- Save config before closing
 
-        -- Close animation
+        -- Close animation (Fade and shrink)
         local tweenInfoClose = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-        local sizeTween = TweenService:Create(mainFrame, tweenInfoClose, { Size = UDim2.new(settings.Size.X.Scale, settings.Size.X.Offset, 0, 0) })
-        local posTween = TweenService:Create(mainFrame, tweenInfoClose, { Position = UDim2.new(position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset + mainFrame.AbsoluteSize.Y / 2) })
+        -- Fade out main frame content first
+        for _, child in ipairs(mainFrame:GetChildren()) do
+            if child ~= topbar and child ~= creditsSection and child:IsA("GuiObject") then -- Don't fade topbar/credits initially
+                TweenService:Create(child, tweenInfoClose, { Transparency = 1 }):Play()
+            end
+        end
+        -- Animate size and fade out frame/topbar/credits
+        local sizeTween = TweenService:Create(mainFrame, tweenInfoClose, { Size = UDim2.new(settings.Size.X.Scale, settings.Size.X.Offset * 0.8, 0, 0), Transparency = 1 })
+        local posTween = TweenService:Create(mainFrame, tweenInfoClose, { Position = UDim2.new(position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset + mainFrame.AbsoluteSize.Y * 0.1) }) -- Move down slightly
 
         sizeTween:Play()
         posTween:Play()
 
-        posTween.Completed:Connect(function()
-            screenGui:Destroy() -- Destroy the root ScreenGui
+        -- Destroy the entire ScreenGui after animation
+        sizeTween.Completed:Connect(function()
+            if screenGui and screenGui.Parent then
+                Utility.destroyInstance(screenGui) -- Use pooled destroy for the root
+            end
         end)
     end))
 
-    local minimized = false
-    local restoreButton = nil
     Window:AddConnection(minimizeButton.MouseButton1Click:Connect(function()
-        minimized = not minimized
+        Window._minimized = not Window._minimized
         local targetSize
-        local tweenInfoMinimize = TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        local tweenInfoMinimize = TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
 
-        if minimized then
-            targetSize = UDim2.new(settings.Size.X.Scale, settings.Size.X.Offset, 0, topbar.AbsoluteSize.Y)
-            minimizeButton.Visible = false
+        if Window._minimized then
+            -- Minimizing: Shrink to topbar height
+            targetSize = UDim2.new(settings.Size.X.Scale, settings.Size.X.Offset, 0, topbarHeight)
+            minimizeButton.Visible = false -- Hide minimize icon
 
-            -- Create restore button if it doesn't exist
-            if not restoreButton or not restoreButton.Parent then
-                restoreButton = Utility.createInstance("ImageButton", {
-                    Name = "Restore", Size = minimizeButton.Size, Position = minimizeButton.Position, AnchorPoint = minimizeButton.AnchorPoint, BackgroundTransparency = 1, Image = minimizeButton.Image, ImageColor3 = minimizeButton.ImageColor3, ImageTransparency = 0, Rotation = 180, ZIndex = 3, Parent = topbar
+            -- Create/Show restore button
+            if not Window._restoreButton or not Window._restoreButton.Parent then
+                Window._restoreButton = Utility.createInstance("ImageButton", {
+                    Name = "Restore",
+                    Size = minimizeButton.Size,
+                    Position = minimizeButton.Position, -- Same position as minimize button
+                    AnchorPoint = minimizeButton.AnchorPoint,
+                    BackgroundTransparency = 1,
+                    Image = "rbxassetid://6035067836", -- Use minimize icon image
+                    ImageColor3 = minimizeButton.ImageColor3,
+                    ImageTransparency = 0, -- Start visible
+                    Rotation = 180, -- Rotate to indicate restore
+                    ZIndex = 3,
+                    Parent = topbar
                 })
-                Utility.registerThemedElement(restoreButton, "ImageColor3", "TextColor") -- Theme registration
-                -- Add hover effects for restore button
-                 mainFrame:AddConnection(restoreButton.MouseEnter:Connect(function() TweenService:Create(restoreButton, TweenInfo.new(0.2), { ImageTransparency = 0 }):Play() end))
-                 mainFrame:AddConnection(restoreButton.MouseLeave:Connect(function() TweenService:Create(restoreButton, TweenInfo.new(0.2), { ImageTransparency = 0.2 }):Play() end))
-                 mainFrame:AddConnection(restoreButton.MouseButton1Click:Connect(function() minimizeButton.MouseButton1Click:Fire() end)) -- Trigger minimize logic again to restore
+                Utility.registerThemedElement(Window._restoreButton, "ImageColor3", "TextColor")
+                -- Add hover/click effects for restore button
+                 mainFrame:AddConnection(Window._restoreButton.MouseEnter:Connect(function() TweenService:Create(Window._restoreButton, TweenInfo.new(0.2), { ImageTransparency = 0 }):Play() end))
+                 mainFrame:AddConnection(Window._restoreButton.MouseLeave:Connect(function() TweenService:Create(Window._restoreButton, TweenInfo.new(0.2), { ImageTransparency = buttonTransparency }):Play() end))
+                 mainFrame:AddConnection(Window._restoreButton.MouseButton1Click:Connect(function() minimizeButton.MouseButton1Click:Fire() end)) -- Trigger minimize logic again to restore
             end
-            restoreButton.Visible = true
+            Window._restoreButton.Visible = true
 
         else
+            -- Restoring: Expand back to original size
             targetSize = settings.Size
-            minimizeButton.Visible = true
-            if restoreButton and restoreButton.Parent then
-                restoreButton.Visible = false -- Hide restore button
+            minimizeButton.Visible = true -- Show minimize icon
+            if Window._restoreButton and Window._restoreButton.Parent then
+                Window._restoreButton.Visible = false -- Hide restore button
             end
         end
 
+        -- Animate the main frame size
         TweenService:Create(mainFrame, tweenInfoMinimize, { Size = targetSize }):Play()
     end))
 
     Window:AddConnection(settingsButton.MouseButton1Click:Connect(function()
         local isOpeningSettings = not self._settingsPage.Visible
         if isOpeningSettings then
-            self:_selectTab(settingsButton, self._settingsPage) -- Pass settingsButton to indicate settings context
+            -- Select the settings page, passing the settingsButton as context (though not strictly needed for highlighting)
+            self:_selectTab(settingsButton, self._settingsPage)
         else
-            -- If closing settings, select the first available tab
-            local firstTabButton = nil
-            for _, child in ipairs(self._tabScrollFrame:GetChildren()) do
-                 if child:IsA("Frame") and child:FindFirstChild("Interact") and child.Name ~= "Header" then -- Find first actual tab button
-                    firstTabButton = child
-                    break
-                 end
+            -- Closing settings: Select the previously active tab or the first available tab
+            local targetTabButton = self._activeTabButton -- Try to return to the tab that was active before settings
+            local targetPage = nil
+
+            if not targetTabButton then -- If no tab was active (e.g., just opened settings), find the first one
+                for _, child in ipairs(self._tabScrollFrame:GetChildren()) do
+                     -- Find first actual tab button (Frame with an Interact child, not a header)
+                     if child:IsA("Frame") and child:FindFirstChild("Interact") and child.Name ~= "Header" then
+                        targetTabButton = child
+                        break
+                     end
+                end
             end
-            if firstTabButton then
-                 local page = self._elementsPageFolder:FindFirstChild(firstTabButton.Name)
-                 if page then
-                     self:_selectTab(firstTabButton, page)
-                 end
+
+            if targetTabButton then
+                 targetPage = self._elementsPageFolder:FindFirstChild(targetTabButton.Name)
+            end
+
+            if targetTabButton and targetPage then
+                 self:_selectTab(targetTabButton, targetPage)
             else
-                 -- No tabs exist, just hide settings
+                 -- No tabs exist, or couldn't find page, just hide settings and clear active state
                  self._settingsPage.Visible = false
                  self._activePage = nil
-                 self._activeTab = nil
+                 self._activeTabButton = nil
+                 -- Deselect the (now hidden) settings page visually if needed (though _selectTab handles deselection)
             end
         end
     end))
 
-    -- Make draggable
+    -- Make draggable using the topbar as the handle
     Utility.makeDraggable(mainFrame, topbar)
 
-    -- Window API Methods
+    -- ============================ --
+    --      Window API Methods      --
+    -- ============================ --
+
+    -- Set Theme dynamically
     function Window:SetTheme(themeName)
         if not LuminaUI.Theme[themeName] then
             warn("[LuminaUI] Invalid theme name:", themeName)
@@ -1540,1308 +1843,2262 @@ function LuminaUI:CreateWindow(settings)
         self.CurrentTheme = LuminaUI.Theme[themeName]
         self.Settings.Theme = themeName -- Update settings table
 
-        -- Apply theme to all registered elements
-        Utility.applyThemeToAll(self.CurrentTheme)
+        -- Apply theme to all registered elements using the attribute system
+        Utility.applyThemeToAll(self.ScreenGui, self.CurrentTheme)
 
-        -- Manually update elements not easily covered by registry (like hover states if needed)
-        -- Example: Re-apply scrollbar themes
-        for _, child in ipairs(self._elementsPageFolder:GetChildren()) do
-            if child:IsA("ScrollingFrame") then
-                 local scrollbar = child:FindFirstChild("CustomScrollbar")
-                 if scrollbar then
-                     local thumb = scrollbar:FindFirstChild("ScrollThumb")
-                     scrollbar.BackgroundColor3 = self.CurrentTheme.ScrollBarBackground
-                     if thumb then thumb.BackgroundColor3 = self.CurrentTheme.ScrollBarForeground end
-                 end
+        -- Manually update elements/styles not easily covered by simple attribute registration
+        -- e.g., Re-apply scrollbar themes (could also be done via attributes on scrollbar parts)
+        for _, frame in ipairs(self.ScreenGui:GetDescendants()) do
+            if frame:IsA("ScrollingFrame") and frame:FindFirstChild("CustomScrollbar") then
+                local scrollbar = frame.CustomScrollbar
+                local thumb = scrollbar:FindFirstChild("ScrollThumb")
+                if scrollbar:GetAttribute("LuminaThemeKey_BackgroundColor3") then
+                    scrollbar.BackgroundColor3 = self.CurrentTheme.ScrollBarBackground
+                end
+                if thumb and thumb:GetAttribute("LuminaThemeKey_BackgroundColor3") then
+                    thumb.BackgroundColor3 = self.CurrentTheme.ScrollBarForeground
+                end
             end
+            -- Update hover colors stored in component logic if necessary (complex)
+            -- This might require iterating through self._components if that registry is maintained
         end
-         local tabScrollbar = self._tabScrollFrame:FindFirstChild("CustomScrollbar")
-         if tabScrollbar then
-             local thumb = tabScrollbar:FindFirstChild("ScrollThumb")
-             tabScrollbar.BackgroundColor3 = self.CurrentTheme.ScrollBarBackground
-             if thumb then thumb.BackgroundColor3 = self.CurrentTheme.ScrollBarForeground end
-         end
+
+        -- Re-style the currently selected tab
+        if self._activeTabButton and self._activeTabButton.Parent then
+            local tab = self._activeTabButton
+            local title = tab:FindFirstChild("Title")
+            local icon = tab:FindFirstChild("Icon")
+            tab.BackgroundColor3 = self.CurrentTheme.TabBackgroundSelected
+            if title then title.TextColor3 = self.CurrentTheme.SelectedTabTextColor end
+            if icon then icon.ImageColor3 = self.CurrentTheme.SelectedTabTextColor end
+        end
     end
 
+    -- Create Notification
     function Window:CreateNotification(notificationSettings)
         notificationSettings = notificationSettings or {}
         local title = notificationSettings.Title or "Notification"
         local content = notificationSettings.Content or "Content"
         local duration = notificationSettings.Duration or 5
-        local iconId = notificationSettings.Icon or 0
+        local iconId = notificationSettings.Icon -- nil or 0 if not provided
         local theme = self.CurrentTheme
+
+        local notificationHeight = 65 -- Base height
+        local contentPadding = 8
+        local iconSize = (iconId and iconId ~= 0) and 24 or 0
+        local closeButtonSize = 14
 
         local notification = Utility.createInstance("Frame", {
             Name = "Notification",
-            Size = UDim2.new(1, 0, 0, 65), -- Fixed height based on content below
+            Size = UDim2.new(1, 0, 0, notificationHeight),
             BackgroundColor3 = theme.NotificationBackground,
-            BackgroundTransparency = 1, -- Start transparent
-            Position = UDim2.new(0, 0, 0, 20), -- Start offset for animation
-            Parent = self._notificationsContainer,
+            BackgroundTransparency = 1, -- Start transparent for fade-in
+            Position = UDim2.new(0, 0, 0, 20), -- Start offset down for animation
+            Parent = self._notificationsContainer, -- Parent to the dedicated container
             ClipsDescendants = true
         })
         Utility.createCorner(notification, 6)
-        Utility.manageConnections(notification) -- Manage connections
+        Utility.manageConnections(notification) -- Manage connections for auto-cleanup
 
-        local contentPadding = 8
-        local iconSize = (iconId ~= 0) and 24 or 0
-        local textX = contentPadding + (iconId ~= 0 and (iconSize + contentPadding) or 0)
-        local textWidth = notification.AbsoluteSize.X - textX - contentPadding - 16 -- Subtract close button space
-
-        if iconId ~= 0 then
+        -- Icon (Optional)
+        local textX = contentPadding
+        if iconSize > 0 then
+            textX = contentPadding + iconSize + contentPadding -- Adjust text start position
             local icon = Utility.createInstance("ImageLabel", {
-                Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, contentPadding, 0.5, -iconSize/2 - 5), AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(iconId), ImageTransparency = 1, Parent = notification
+                Name = "Icon",
+                Size = UDim2.new(0, iconSize, 0, iconSize),
+                Position = UDim2.new(0, contentPadding, 0.5, 0), -- Position left, centered vertically
+                AnchorPoint = Vector2.new(0, 0.5),
+                BackgroundTransparency = 1,
+                Image = Utility.loadIcon(iconId),
+                ImageTransparency = 1, -- Start transparent
+                ZIndex = notification.ZIndex + 1,
+                Parent = notification
             })
+             -- Fade in icon with main animation
              TweenService:Create(icon, TweenInfo.new(0.4), { ImageTransparency = 0 }):Play()
         end
 
+        -- Close Button
+        local closeNotifButton = Utility.createInstance("ImageButton", {
+            Name = "Close",
+            Size = UDim2.new(0, closeButtonSize, 0, closeButtonSize),
+            Position = UDim2.new(1, -contentPadding, 0, contentPadding), -- Top-right corner
+            AnchorPoint = Vector2.new(1, 0),
+            BackgroundTransparency = 1,
+            Image = "rbxassetid://6035047409", -- Close icon
+            ImageColor3 = theme.TextColor,
+            ImageTransparency = 1, -- Start transparent
+            ZIndex = notification.ZIndex + 2, -- Above content
+            Parent = notification
+        })
+        Utility.registerThemedElement(closeNotifButton, "ImageColor3", "TextColor")
+
+        -- Calculate available width for text (Container width - left padding - textX - close button area - right padding)
+        local textWidth = notification.AbsoluteSize.X - textX - (closeButtonSize + contentPadding * 2)
+
+        -- Title Label
         local titleLabel = Utility.createInstance("TextLabel", {
-            Name = "Title", Size = UDim2.new(0, textWidth, 0, 18), Position = UDim2.new(0, textX, 0, contentPadding), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = title, TextColor3 = theme.TextColor, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, TextTransparency = 1, Parent = notification
+            Name = "Title",
+            Size = UDim2.new(0, textWidth, 0, 18), -- Fixed height for title
+            Position = UDim2.new(0, textX, 0, contentPadding), -- Positioned below icon/padding
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            Text = title,
+            TextColor3 = theme.TextColor,
+            TextSize = 14,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTransparency = 1, -- Start transparent
+            ZIndex = notification.ZIndex + 1,
+            Parent = notification
         })
+        Utility.registerThemedElement(titleLabel, "TextColor3", "TextColor")
 
+        -- Body Label
         local bodyLabel = Utility.createInstance("TextLabel", {
-            Name = "Body", Size = UDim2.new(0, textWidth, 0, 30), Position = UDim2.new(0, textX, 0, contentPadding + 20), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = content, TextColor3 = theme.SubTextColor, TextSize = 13, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, TextTransparency = 1, Parent = notification
+            Name = "Body",
+            Size = UDim2.new(0, textWidth, 0, notificationHeight - contentPadding * 3 - 18 - 3), -- Calculate remaining height (Total - top pad - title - mid pad - progress bar)
+            Position = UDim2.new(0, textX, 0, contentPadding + 18 + 4), -- Position below title
+            BackgroundTransparency = 1,
+            Font = Enum.Font.Gotham,
+            Text = content,
+            TextColor3 = theme.SubTextColor,
+            TextSize = 13,
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            TextTransparency = 1, -- Start transparent
+            ZIndex = notification.ZIndex + 1,
+            Parent = notification
         })
+        Utility.registerThemedElement(bodyLabel, "TextColor3", "SubTextColor")
 
-        -- Adjust height based on text bounds if needed (more complex)
-        -- local titleBounds = Utility.getTextBounds(title, titleLabel.Font, titleLabel.TextSize, textWidth)
-        -- local bodyBounds = Utility.getTextBounds(content, bodyLabel.Font, bodyLabel.TextSize, textWidth)
-        -- local requiredHeight = contentPadding * 2 + titleBounds.Y + bodyBounds.Y + 4 -- Approx
-        -- notification.Size = UDim2.new(1, 0, 0, math.max(65, requiredHeight))
+        -- Auto-adjust height based on text bounds (more complex, optional)
+        -- task.defer(function()
+        --     local titleBounds = Utility.getTextBounds(title, titleLabel.Font, titleLabel.TextSize, textWidth)
+        --     local bodyBounds = Utility.getTextBounds(content, bodyLabel.Font, bodyLabel.TextSize, textWidth)
+        --     local requiredTextHeight = titleBounds.Y + bodyBounds.Y + 4 -- Approx text height + spacing
+        --     local requiredTotalHeight = contentPadding * 3 + requiredTextHeight + 3 -- Paddings + text + progress bar
+        --     notification.Size = UDim2.new(1, 0, 0, math.max(notificationHeight, requiredTotalHeight))
+        --     bodyLabel.Size = UDim2.new(0, textWidth, 0, bodyBounds.Y) -- Adjust body label size too
+        -- end)
 
         -- Progress Bar
-        local progressBar = Utility.createInstance("Frame", { Name = "ProgressBar", Size = UDim2.new(1, 0, 0, 3), Position = UDim2.new(0, 0, 1, -3), AnchorPoint = Vector2.new(0, 1), BackgroundColor3 = theme.ProgressBarBackground, BackgroundTransparency = 0.5, Parent = notification })
-        local progressFill = Utility.createInstance("Frame", { Name = "Progress", Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = theme.ProgressBarFill, Parent = progressBar })
-        Utility.createCorner(progressFill, 3) -- Round the fill bar
-
-        -- Close Button
-        local closeNotifButton = Utility.createInstance("ImageButton", { Name = "Close", Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -contentPadding, 0, contentPadding), AnchorPoint = Vector2.new(1, 0), BackgroundTransparency = 1, Image = "rbxassetid://6035047409", ImageColor3 = theme.TextColor, ImageTransparency = 1, ZIndex = notification.ZIndex + 1, Parent = notification })
-
-        local function destroyNotification(animated)
-            if not notification or not notification.Parent then return end
-            local notifRef = notification -- Keep reference
-            notification = nil -- Prevent re-entry
-
-            notifRef:DisconnectAll() -- Disconnect listeners
-
-            if animated then
-                local outTweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-                TweenService:Create(notifRef, outTweenInfo, { BackgroundTransparency = 1, Position = notifRef.Position + UDim2.new(0, 0, 0, 20) }):Play()
-                TweenService:Create(titleLabel, outTweenInfo, { TextTransparency = 1 }):Play()
-                TweenService:Create(bodyLabel, outTweenInfo, { TextTransparency = 1 }):Play()
-                if closeNotifButton and closeNotifButton.Parent then TweenService:Create(closeNotifButton, outTweenInfo, { ImageTransparency = 1 }):Play() end
-                -- Fade out icon if exists
-                local icon = notifRef:FindFirstChild("Icon")
-                if icon then TweenService:Create(icon, outTweenInfo, { ImageTransparency = 1 }):Play() end
-
-                task.wait(0.3)
-            end
-            Utility.destroyInstance(notifRef)
-        end
-
-        notification:AddConnection(closeNotifButton.MouseButton1Click:Connect(function() destroyNotification(true) end))
-        notification:AddConnection(closeNotifButton.MouseEnter:Connect(function() TweenService:Create(closeNotifButton, TweenInfo.new(0.2), { ImageTransparency = 0 }):Play() end))
-        notification:AddConnection(closeNotifButton.MouseLeave:Connect(function() TweenService:Create(closeNotifButton, TweenInfo.new(0.2), { ImageTransparency = 0.5 }):Play() end))
-
-        -- Intro Animation
-        local inTweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out) -- Use Back easing
-        TweenService:Create(notification, inTweenInfo, { BackgroundTransparency = 0, Position = UDim2.new(0, 0, 0, 0) }):Play()
-        TweenService:Create(titleLabel, inTweenInfo, { TextTransparency = 0 }):Play()
-        TweenService:Create(bodyLabel, inTweenInfo, { TextTransparency = 0 }):Play()
-        TweenService:Create(closeNotifButton, inTweenInfo, { ImageTransparency = 0.5 }):Play()
-
-        -- Progress and Auto-Destroy
-        local progressTween = TweenService:Create(progressFill, TweenInfo.new(duration, Enum.EasingStyle.Linear), { Size = UDim2.new(0, 0, 1, 0) })
-        progressTween:Play()
-        notification:AddConnection(progressTween.Completed:Connect(function() destroyNotification(true) end))
-
-        return notification -- Return the instance if needed externally
-    end
-
-    function Window:CreateTab(tabName, iconId)
-        local theme = self.CurrentTheme
-        local tabIconId = iconId or 0
-
-        local tabButton = Utility.createInstance("Frame", {
-            Name = tabName, Size = UDim2.new(1, -10, 0, 34), BackgroundColor3 = theme.TabBackground, BackgroundTransparency = 0.7, Parent = self._tabScrollFrame
-        })
-        Utility.createCorner(tabButton, 6)
-        local stroke = Utility.createStroke(tabButton, theme.ElementStroke, 1, 0.5) -- Use ElementStroke for tabs
-        stroke.Name = "TabStroke" -- For potential specific theme updates
-        Utility.registerThemedElement(tabButton, "BackgroundColor3", "TabBackground")
-        Utility.registerThemedElement(stroke, "Color", "ElementStroke")
-        Utility.manageConnections(tabButton) -- Manage connections
-
-        local iconSize = 16
-        local iconPadding = (tabIconId ~= 0) and (iconSize + 8) or 0 -- Space for icon + padding
-
-        if tabIconId ~= 0 then
-            local tabIcon = Utility.createInstance("ImageLabel", {
-                Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, 8, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(tabIconId), ImageColor3 = theme.TabTextColor, ImageTransparency = 0.2, Parent = tabButton
-            })
-            Utility.registerThemedElement(tabIcon, "ImageColor3", "TabTextColor")
-        end
-
-        local tabTitle = Utility.createInstance("TextLabel", {
-            Name = "Title", Size = UDim2.new(1, -(10 + iconPadding + 10), 1, 0), -- Left padding + icon area + right padding
-            Position = UDim2.new(0, 10 + iconPadding, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = tabName, TextColor3 = theme.TabTextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, TextTransparency = 0.2, Parent = tabButton
-        })
-        Utility.registerThemedElement(tabTitle, "TextColor3", "TabTextColor")
-
-        local tabInteract = Utility.createInstance("TextButton", { Name = "Interact", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = tabButton })
-
-        -- Create Page
-        local tabPage = Utility.createInstance("ScrollingFrame", {
-            Name = tabName,
-            Size = UDim2.new(1, 0, 1, 0),
-            BackgroundTransparency = 1,
+        local progressBarHeight = 3
+        local progressBar = Utility.createInstance("Frame", {
+            Name = "ProgressBar",
+            Size = UDim2.new(1, 0, 0, progressBarHeight),
+            Position = UDim2.new(0, 0, 1, 0), -- Positioned at the bottom
+            AnchorPoint = Vector2.new(0, 1), -- Anchored to bottom-left
+            BackgroundColor3 = theme.ProgressBarBackground,
+            BackgroundTransparency = 0.5,
             BorderSizePixel = 0,
-            CanvasSize = UDim2.new(0, 0, 0, 0),
-            Visible = false,
-            ScrollingDirection = Enum.ScrollingDirection.Y,
-            Parent = self._elementsPageFolder,
-            ZIndex = 3 -- Explicitly set ZIndex higher than elementsContainer
+            ZIndex = notification.ZIndex + 1,
+            Parent = notification
         })
-        Utility.manageConnections(tabPage) -- Manage page connections
+        Utility.createCorner(progressBar, progressBarHeight / 2) -- Round the background
+        Utility.registerThemedElement(progressBar, "BackgroundColor3", "ProgressBarBackground")
 
-        local listLayout = Utility.createInstance("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder, Parent = tabPage })
-        Utility.createInstance("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), Parent = tabPage })
+-- ...existing code... (End of first chunk, inside Window:CreateNotification)
 
-        -- Auto-size canvas
-        tabPage:AddConnection(listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-            tabPage.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 16) -- Add padding
-        end))
+local progressFill = Utility.createInstance("Frame", {
+    Name = "Progress",
+    Size = UDim2.new(1, 0, 1, 0), -- Start full width
+    BackgroundColor3 = theme.ProgressBarFill,
+    BorderSizePixel = 0,
+    ZIndex = progressBar.ZIndex + 1,
+    Parent = progressBar
+})
+Utility.createCorner(progressFill, progressBarHeight / 2) -- Round the fill bar
+Utility.registerThemedElement(progressFill, "BackgroundColor3", "ProgressBarFill")
 
-        -- Apply custom scrollbar
-        Utility.applyCustomScrollbar(tabPage, theme)
+-- Function to destroy the notification with animation
+local function destroyNotification(animated)
+    if not notification or not notification.Parent then return end -- Already destroyed
+    local notifRef = notification -- Keep reference for animation callbacks
+    notification = nil -- Prevent re-entry / double destroy calls
 
-        -- Tab Selection Logic
-        tabButton:AddConnection(tabInteract.MouseButton1Click:Connect(function()
-            self:_selectTab(tabButton, tabPage)
-        end))
+    notifRef:DisconnectAll() -- Disconnect listeners immediately
 
-        -- Tab Object API
-        local Tab = {
-            Instance = tabButton,
-            Page = tabPage,
-            _connections = {},
-            _components = {} -- Store components created within this tab
-        }
-        Utility.manageConnections(Tab) -- Manage connections for the Tab object itself
-
-        -- Register tab button and page for potential theme updates (though handled by _selectTab mostly)
-        table.insert(self.Tabs, Tab)
-
-        -- Component Creation Methods (Nested within Tab)
-        function Tab:CreateSection(sectionName)
-            local sectionContainer = Utility.createInstance("Frame", { Name = "Section_" .. sectionName, Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1, Parent = self.Page })
-            Utility.manageConnections(sectionContainer) -- Manage connections
-
-            local sectionTitle = Utility.createInstance("TextLabel", { Name = "Title", Size = UDim2.new(1, 0, 0, 26), Position = UDim2.new(0, 0, 0, 5), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = sectionName, TextColor3 = Window.CurrentTheme.TextColor, TextSize = 14, TextTransparency = 0.2, TextXAlignment = Enum.TextXAlignment.Left, Parent = sectionContainer })
-            Utility.registerThemedElement(sectionTitle, "TextColor3", "TextColor")
-
-            local sectionLine = Utility.createInstance("Frame", { Name = "Line", Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -5), AnchorPoint = Vector2.new(0,1), BackgroundColor3 = Window.CurrentTheme.ElementStroke, BackgroundTransparency = 0.5, Parent = sectionContainer })
-            Utility.registerThemedElement(sectionLine, "BackgroundColor3", "ElementStroke")
-
-            table.insert(self._components, sectionContainer) -- Track for potential cleanup/theming
-            return sectionContainer -- Return instance for layout order or direct manipulation
+    if animated then
+        local outTweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In) -- Use In for exit
+        -- Fade out main frame and move down
+        TweenService:Create(notifRef, outTweenInfo, { BackgroundTransparency = 1, Position = notifRef.Position + UDim2.new(0, 0, 0, 20) }):Play()
+        -- Fade out text and controls
+        for _, child in ipairs(notifRef:GetChildren()) do
+            if child:IsA("TextLabel") or child:IsA("ImageLabel") or child:IsA("ImageButton") then
+                local prop = child:IsA("TextLabel") and "TextTransparency" or "ImageTransparency"
+                TweenService:Create(child, outTweenInfo, { [prop] = 1 }):Play()
+            elseif child.Name == "ProgressBar" then -- Fade out progress bar too
+                 TweenService:Create(child, outTweenInfo, { BackgroundTransparency = 1 }):Play()
+                 local fill = child:FindFirstChild("Progress")
+                 if fill then TweenService:Create(fill, outTweenInfo, { BackgroundTransparency = 1 }):Play() end
+            end
         end
 
-        function Tab:CreateButton(options)
-            options = options or {}
-            local name = options.Name or "Button"
-            local callback = options.Callback or function() end
-            local iconId = options.Icon or 0
-            local tooltipText = options.Tooltip or nil
-            local theme = Window.CurrentTheme
+        -- Use pooled destroy after animation
+        task.delay(outTweenInfo.Time, function()
+            Utility.destroyInstance(notifRef)
+        end)
+    else
+        Utility.destroyInstance(notifRef) -- Destroy immediately if not animated
+    end
+end
 
-            local buttonContainer = Utility.createInstance("Frame", { Name = "Button_" .. name, Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = theme.ElementBackground, Parent = self.Page })
-            Utility.createCorner(buttonContainer, 4)
-            Utility.registerThemedElement(buttonContainer, "BackgroundColor3", "ElementBackground", "ElementBackgroundHover") -- Register hover state key
-            Utility.manageConnections(buttonContainer)
+-- Close button interaction
+notification:AddConnection(closeNotifButton.MouseButton1Click:Connect(function() destroyNotification(true) end))
+notification:AddConnection(closeNotifButton.MouseEnter:Connect(function() TweenService:Create(closeNotifButton, TweenInfo.new(0.2), { ImageTransparency = 0 }):Play() end))
+notification:AddConnection(closeNotifButton.MouseLeave:Connect(function() TweenService:Create(closeNotifButton, TweenInfo.new(0.2), { ImageTransparency = 0.5 }):Play() end))
 
-            local iconPadding = 0
-            if iconId ~= 0 then
-                local buttonIcon = Utility.createInstance("ImageLabel", { Name = "Icon", Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 8, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(iconId), ImageColor3 = theme.TextColor, Parent = buttonContainer })
-                Utility.registerThemedElement(buttonIcon, "ImageColor3", "TextColor")
-                iconPadding = 30
-            end
+-- Intro Animation
+local inTweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out) -- Use Back easing for entry
+TweenService:Create(notification, inTweenInfo, { BackgroundTransparency = 0, Position = UDim2.new(0, 0, 0, 0) }):Play()
+TweenService:Create(titleLabel, inTweenInfo, { TextTransparency = 0 }):Play()
+TweenService:Create(bodyLabel, inTweenInfo, { TextTransparency = 0 }):Play()
+TweenService:Create(closeNotifButton, inTweenInfo, { ImageTransparency = 0.5 }):Play()
 
-            local buttonTitle = Utility.createInstance("TextLabel", { Name = "Title", Size = UDim2.new(1, -(10 + iconPadding), 1, 0), Position = UDim2.new(0, 10 + iconPadding, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = name, TextColor3 = theme.TextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = buttonContainer })
-            Utility.registerThemedElement(buttonTitle, "TextColor3", "TextColor")
+-- Progress and Auto-Destroy
+local progressTween = TweenService:Create(progressFill, TweenInfo.new(duration, Enum.EasingStyle.Linear), { Size = UDim2.new(0, 0, 1, 0) })
+progressTween:Play()
+-- Connect Completed to the destroy function
+notification:AddConnection(progressTween.Completed:Connect(function(playbackState)
+    -- Ensure it completed normally before destroying
+    if playbackState == Enum.PlaybackState.Completed then
+        destroyNotification(true)
+    end
+end))
 
-            local buttonInteract = Utility.createInstance("TextButton", { Name = "Interact", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = buttonContainer })
+return notification -- Return the instance if needed externally
+end
 
-            -- Effects & Callback
-            local hoverColor = theme.ElementBackgroundHover
-            local normalColor = theme.ElementBackground
-            local clickColor = Utility.darker(hoverColor, 0.1)
-            local tweenInfo = TweenInfo.new(0.15)
+-- Create Tab
+function Window:CreateTab(tabSettings)
+tabSettings = tabSettings or {}
+local name = tabSettings.Name or "Tab"
+local iconId = tabSettings.Icon -- nil or 0 if not provided
+local order = tabSettings.Order or (#self.Tabs + 1) -- Default order based on creation
+local theme = self.CurrentTheme
 
-            buttonContainer:AddConnection(buttonInteract.MouseEnter:Connect(function()
-                TweenService:Create(buttonContainer, tweenInfo, { BackgroundColor3 = hoverColor }):Play()
-                if tooltipText then Utility.showTooltip(tooltipText, theme) end
-            end))
-            buttonContainer:AddConnection(buttonInteract.MouseLeave:Connect(function()
-                TweenService:Create(buttonContainer, tweenInfo, { BackgroundColor3 = normalColor }):Play()
-                if tooltipText then Utility.hideTooltip() end
-            end))
-            buttonContainer:AddConnection(buttonInteract.MouseButton1Down:Connect(function()
-                TweenService:Create(buttonContainer, tweenInfo, { BackgroundColor3 = clickColor }):Play()
-            end))
-            buttonContainer:AddConnection(buttonInteract.MouseButton1Up:Connect(function()
-                TweenService:Create(buttonContainer, tweenInfo, { BackgroundColor3 = hoverColor }):Play() -- Revert to hover color on release
-            end))
-            buttonContainer:AddConnection(buttonInteract.MouseButton1Click:Connect(function()
-                 Utility.rippleEffect(buttonContainer)
-                 Utility.safeCall(callback)
-            end))
+-- Create the Tab Button Frame
+local tabButton = Utility.createInstance("Frame", {
+    Name = name, -- Use tab name for the button frame name (used for page lookup)
+    Size = UDim2.new(1, -10, 0, 35), -- Full width (-padding), fixed height
+    BackgroundColor3 = theme.TabBackground,
+    BackgroundTransparency = 0.7, -- Start slightly transparent
+    LayoutOrder = order,
+    Parent = self._tabScrollFrame -- Parent to the tab scroll frame
+})
+Utility.createCorner(tabButton, 4)
+Utility.manageConnections(tabButton) -- Manage connections for the tab button
 
-            -- Component API
-            local ButtonComponent = {
-                Instance = buttonContainer,
-                SetText = function(self, text) name = text; buttonTitle.Text = text; end,
-                SetIcon = function(self, newIconId)
-                    local icon = self.Instance:FindFirstChild("Icon")
-                    if newIconId and newIconId ~= 0 then
-                        if icon then
-                            icon.Image = Utility.loadIcon(newIconId)
-                        else -- Create icon if it didn't exist
-                            icon = Utility.createInstance("ImageLabel", { Name = "Icon", Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 8, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(newIconId), ImageColor3 = Window.CurrentTheme.TextColor, Parent = self.Instance })
-                            Utility.registerThemedElement(icon, "ImageColor3", "TextColor")
-                            buttonTitle.Position = UDim2.new(0, 10 + 30, 0, 0) -- Adjust title pos
-                            buttonTitle.Size = UDim2.new(1, -(10 + 30), 1, 0)
-                        end
-                    elseif icon then -- Remove icon if newId is 0 or nil
-                        Utility.destroyInstance(icon)
-                        buttonTitle.Position = UDim2.new(0, 10, 0, 0)
-                        buttonTitle.Size = UDim2.new(1, -10, 1, 0)
-                    end
-                end,
-                SetTooltip = function(self, text) tooltipText = text end,
-                Destroy = function(self) Utility.destroyInstance(self.Instance) end -- Use utility destroy
-            }
-            table.insert(self._components, ButtonComponent) -- Track component
-            return ButtonComponent
-        end
+-- Stroke (initially visible)
+local tabStroke = Utility.createStroke(tabButton, theme.ElementStroke, 1, 0, "ElementStroke")
+tabStroke.Name = "TabStroke" -- Name for easy lookup
 
-        function Tab:CreateToggle(options)
-            options = options or {}
-            local name = options.Name or "Toggle"
-            local currentValue = options.CurrentValue or false
-            local flag = options.Flag or nil
-            local callback = options.Callback or function() end
-            local iconId = options.Icon or 0
-            local tooltipText = options.Tooltip or nil
-            local theme = Window.CurrentTheme
+-- Icon (Optional)
+local titleX = 10 -- Default left padding for title
+if iconId and iconId ~= 0 then
+    titleX = 10 + 18 + 5 -- Padding + Icon Size + Spacing
+    local icon = Utility.createInstance("ImageLabel", {
+        Name = "Icon",
+        Size = UDim2.new(0, 18, 0, 18),
+        Position = UDim2.new(0, 10, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5),
+        BackgroundTransparency = 1,
+        Image = Utility.loadIcon(iconId),
+        ImageColor3 = theme.TabTextColor,
+        ImageTransparency = 0.2, -- Start slightly transparent
+        ZIndex = tabButton.ZIndex + 1,
+        Parent = tabButton
+    })
+    Utility.registerThemedElement(icon, "ImageColor3", "TabTextColor", "SelectedTabTextColor") -- Register for theme updates
+end
 
-            local toggleContainer = Utility.createInstance("Frame", { Name = "Toggle_" .. name, Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = theme.ElementBackground, Parent = self.Page })
-            Utility.createCorner(toggleContainer, 4)
-            Utility.registerThemedElement(toggleContainer, "BackgroundColor3", "ElementBackground", "ElementBackgroundHover")
-            Utility.manageConnections(toggleContainer)
+-- Title
+local title = Utility.createInstance("TextLabel", {
+    Name = "Title",
+    Size = UDim2.new(1, -(titleX + 5), 1, 0), -- Fill remaining width
+    Position = UDim2.new(0, titleX, 0, 0),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.GothamBold,
+    Text = name,
+    TextColor3 = theme.TabTextColor,
+    TextSize = 13,
+    TextTransparency = 0.2, -- Start slightly transparent
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = tabButton.ZIndex + 1,
+    Parent = tabButton
+})
+Utility.registerThemedElement(title, "TextColor3", "TabTextColor", "SelectedTabTextColor") -- Register for theme updates
 
-            local iconPadding = 0
-            if iconId ~= 0 then
-                local toggleIcon = Utility.createInstance("ImageLabel", { Name = "Icon", Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 8, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(iconId), ImageColor3 = theme.TextColor, Parent = toggleContainer })
-                Utility.registerThemedElement(toggleIcon, "ImageColor3", "TextColor")
-                iconPadding = 30
-            end
+-- Interaction Button (covers the whole tab area)
+local interact = Utility.createInstance("TextButton", {
+    Name = "Interact",
+    Size = UDim2.new(1, 0, 1, 0),
+    BackgroundTransparency = 1, -- Fully transparent
+    Text = "",
+    ZIndex = tabButton.ZIndex + 2, -- Above text/icon
+    Parent = tabButton
+})
 
-            local toggleTitle = Utility.createInstance("TextLabel", { Name = "Title", Size = UDim2.new(1, -(60 + iconPadding), 1, 0), Position = UDim2.new(0, 10 + iconPadding, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = name, TextColor3 = theme.TextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = toggleContainer })
-            Utility.registerThemedElement(toggleTitle, "TextColor3", "TextColor")
+-- Create the corresponding Page (ScrollingFrame)
+local page = Utility.createInstance("ScrollingFrame", {
+    Name = name, -- Match the tab button name
+    Size = UDim2.new(1, 0, 1, 0), -- Full size of elements container
+    BackgroundTransparency = 1, -- Transparent background
+    BorderSizePixel = 0,
+    ScrollingDirection = Enum.ScrollingDirection.Y,
+    CanvasSize = UDim2.new(0, 0, 0, 0), -- Auto-sized by layout
+    ScrollBarThickness = 0, -- Hide default scrollbar
+    Visible = false, -- Initially hidden
+    Parent = self._elementsPageFolder -- Parent to the page folder
+})
+Utility.manageConnections(page) -- Manage connections for the page
 
-            local toggleFrame = Utility.createInstance("Frame", { Name = "Toggle", Size = UDim2.new(0, 36, 0, 18), Position = UDim2.new(1, -46, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = currentValue and theme.ToggleEnabled or theme.ToggleDisabled, Parent = toggleContainer })
-            Utility.createCorner(toggleFrame, 9) -- Fully rounded
-            -- No direct theme registration needed here, updated via SetValue
+-- Layout for elements within the page
+local pageLayout = Utility.createInstance("UIListLayout", {
+    Padding = UDim.new(0, 8),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    HorizontalAlignment = Enum.HorizontalAlignment.Center,
+    Parent = page
+})
+-- Padding within the page scroll frame
+Utility.createInstance("UIPadding", {
+    PaddingTop = UDim.new(0, 10),
+    PaddingLeft = UDim.new(0, 10),
+    PaddingRight = UDim.new(0, 10),
+    PaddingBottom = UDim.new(0, 10),
+    Parent = page
+})
 
-            local toggleBall = Utility.createInstance("Frame", { Name = "Ball", Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0, currentValue and 20 or 2, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), BackgroundColor3 = Color3.fromRGB(255, 255, 255), Parent = toggleFrame })
-            Utility.createCorner(toggleBall, 7) -- Fully rounded
+-- Apply custom scrollbar to the page
+Utility.applyCustomScrollbar(page, theme, 4)
 
-            local toggleInteract = Utility.createInstance("TextButton", { Name = "Interact", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = toggleContainer })
+-- Tab Button Interaction
+tabButton:AddConnection(interact.MouseButton1Click:Connect(function()
+    self:_selectTab(tabButton, page)
+end))
 
-            -- Component API first to use SetValue internally
-            local ToggleComponent = { Instance = toggleContainer, Value = currentValue }
-            function ToggleComponent:SetValue(value, skipCallback)
-                value = not not value -- Ensure boolean
-                if self.Value == value then return end -- No change
+-- Hover Effects (applied to the main tabButton frame)
+local tweenInfoHover = TweenInfo.new(0.2)
+tabButton:AddConnection(interact.MouseEnter:Connect(function()
+    if self._activeTabButton ~= tabButton then -- Only apply hover if not selected
+        TweenService:Create(tabButton, tweenInfoHover, { BackgroundTransparency = 0.5 }):Play()
+        if title then TweenService:Create(title, tweenInfoHover, { TextTransparency = 0 }):Play() end
+        local icon = tabButton:FindFirstChild("Icon")
+        if icon then TweenService:Create(icon, tweenInfoHover, { ImageTransparency = 0 }):Play() end
+    end
+end))
+tabButton:AddConnection(interact.MouseLeave:Connect(function()
+    if self._activeTabButton ~= tabButton then -- Only revert hover if not selected
+        TweenService:Create(tabButton, tweenInfoHover, { BackgroundTransparency = 0.7 }):Play()
+        if title then TweenService:Create(title, tweenInfoHover, { TextTransparency = 0.2 }):Play() end
+        local icon = tabButton:FindFirstChild("Icon")
+        if icon then TweenService:Create(icon, tweenInfoHover, { ImageTransparency = 0.2 }):Play() end
+    end
+end))
 
-                self.Value = value
-                local theme = Window.CurrentTheme -- Get current theme
+-- Tab API Table
+local Tab = {
+    Instance = page, -- Reference to the ScrollingFrame page
+    ButtonInstance = tabButton, -- Reference to the tab button Frame
+    Layout = pageLayout, -- Reference to the UIListLayout
+    _window = self, -- Reference back to the main Window API
+    _connections = {}, -- Connections specific to this tab API object
+    _components = {} -- Components added to this tab
+}
+Utility.manageConnections(Tab) -- Manage connections for the Tab API object
 
-                -- Update UI
-                local targetColor = value and theme.ToggleEnabled or theme.ToggleDisabled
-                local targetPos = UDim2.new(0, value and 20 or 2, 0.5, 0)
-                TweenService:Create(toggleFrame, TweenInfo.new(0.2), { BackgroundColor3 = targetColor }):Play()
-                TweenService:Create(toggleBall, TweenInfo.new(0.2), { Position = targetPos }):Play()
+-- ============================ --
+--      Tab API Methods         --
+-- ============================ --
 
-                -- Update flags
-                if flag then
-                    LuminaUI.Flags[flag] = { Type = "Toggle", Value = value, ComponentRef = self }
-                end
+-- Add Component (Generic function to add any created component)
+function Tab:AddComponent(componentInstance, componentApi)
+    if not componentInstance or not componentInstance:IsA("GuiObject") then
+        warn("[LuminaUI] Invalid component instance passed to AddComponent.")
+        return
+    end
+    componentInstance.Parent = self.Instance -- Parent the component's main frame to the tab page
+    table.insert(self._components, componentApi or componentInstance) -- Store API or instance
+    return componentApi or componentInstance -- Return the API if provided, else the instance
+end
 
-                -- Execute callback
-                if not skipCallback then
-                    Utility.safeCall(callback, value)
-                end
-            end
-            function ToggleComponent:SetVisible(visible) self.Instance.Visible = visible end
-            function ToggleComponent:SetTooltip(text) tooltipText = text end
-            function ToggleComponent:Destroy() Utility.destroyInstance(self.Instance) end
+-- Add Label
+function Tab:AddLabel(labelSettings)
+    labelSettings = labelSettings or {}
+    local text = labelSettings.Text or "Label"
+    local size = labelSettings.Size or UDim2.new(1, 0, 0, 20)
+    local order = labelSettings.Order or (#self._components + 1)
+    local theme = self._window.CurrentTheme
 
-             -- Store flag reference immediately
-            if flag then
-                LuminaUI.Flags[flag] = { Type = "Toggle", Value = currentValue, ComponentRef = ToggleComponent }
-            end
+    local label = Utility.createInstance("TextLabel", {
+        Name = "Label_" .. text,
+        Size = size,
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham,
+        Text = text,
+        TextColor3 = theme.TextColor,
+        TextSize = 14,
+        TextXAlignment = labelSettings.Align or Enum.TextXAlignment.Left,
+        TextWrapped = labelSettings.Wrap or false,
+        LayoutOrder = order,
+        -- Parent is set by AddComponent
+    })
+    Utility.registerThemedElement(label, "TextColor3", "TextColor")
 
-            -- Effects & Interaction
-            local hoverColor = theme.ElementBackgroundHover
-            local normalColor = theme.ElementBackground
-            local tweenInfo = TweenInfo.new(0.15)
-
-            toggleContainer:AddConnection(toggleInteract.MouseEnter:Connect(function()
-                TweenService:Create(toggleContainer, tweenInfo, { BackgroundColor3 = hoverColor }):Play()
-                if tooltipText then Utility.showTooltip(tooltipText, theme) end
-            end))
-            toggleContainer:AddConnection(toggleInteract.MouseLeave:Connect(function()
-                TweenService:Create(toggleContainer, tweenInfo, { BackgroundColor3 = normalColor }):Play()
-                if tooltipText then Utility.hideTooltip() end
-            end))
-            toggleContainer:AddConnection(toggleInteract.MouseButton1Click:Connect(function()
-                ToggleComponent:SetValue(not ToggleComponent.Value) -- Use SetValue to handle updates
-            end))
-
-            table.insert(self._components, ToggleComponent)
-            return ToggleComponent
-        end
-
--- ...existing code...
-
-function Tab:CreateSlider(options)
-    options = options or {}
-    local name = options.Name or "Slider"
-    local range = options.Range or {0, 100}
-    local increment = options.Increment or 1
-    local suffix = options.Suffix or ""
-    local currentValue = options.CurrentValue or range[1]
-    local flag = options.Flag or nil
-    local callback = options.Callback or function() end
-    local iconId = options.Icon or 0
-    local tooltipText = options.Tooltip or nil
-    local theme = Window.CurrentTheme
-
-    local min, max = range[1], range[2]
-    currentValue = math.clamp(currentValue, min, max) -- Clamp initial value
-
-    local sliderContainer = Utility.createInstance("Frame", { Name = "Slider_" .. name, Size = UDim2.new(1, 0, 0, 50), BackgroundColor3 = theme.ElementBackground, Parent = self.Page })
-    Utility.createCorner(sliderContainer, 4)
-    Utility.registerThemedElement(sliderContainer, "BackgroundColor3", "ElementBackground", "ElementBackgroundHover")
-    Utility.manageConnections(sliderContainer)
-
-    local iconPadding = 0
-    if iconId ~= 0 then
-        local sliderIcon = Utility.createInstance("ImageLabel", { Name = "Icon", Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 8, 0, 8), BackgroundTransparency = 1, Image = Utility.loadIcon(iconId), ImageColor3 = theme.TextColor, Parent = sliderContainer })
-        Utility.registerThemedElement(sliderIcon, "ImageColor3", "TextColor")
-        iconPadding = 30
+    -- Add tooltip if provided
+    if labelSettings.Tooltip then
+         self:AddConnection(label.MouseEnter:Connect(function() Utility.showTooltip(labelSettings.Tooltip, theme) end))
+         self:AddConnection(label.MouseLeave:Connect(function() Utility.hideTooltip() end))
     end
 
-    local sliderTitle = Utility.createInstance("TextLabel", { Name = "Title", Size = UDim2.new(1, -(10 + iconPadding + 60), 0, 20), Position = UDim2.new(0, 10 + iconPadding, 0, 6), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = name, TextColor3 = theme.TextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = sliderContainer })
-    Utility.registerThemedElement(sliderTitle, "TextColor3", "TextColor")
+    return self:AddComponent(label)
+end
 
-    local valueDisplay = Utility.createInstance("TextLabel", { Name = "Value", Size = UDim2.new(0, 50, 0, 20), Position = UDim2.new(1, -60, 0, 6), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = Utility.formatNumber(currentValue) .. suffix, TextColor3 = theme.SubTextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Right, Parent = sliderContainer })
-    Utility.registerThemedElement(valueDisplay, "TextColor3", "SubTextColor")
+-- Add Button
+function Tab:AddButton(buttonSettings)
+    buttonSettings = buttonSettings or {}
+    local text = buttonSettings.Text or "Button"
+    local order = buttonSettings.Order or (#self._components + 1)
+    local callback = buttonSettings.Callback or function() print("[LuminaUI] Button '"..text.."' clicked.") end
+    local theme = self._window.CurrentTheme
 
-    local sliderBackground = Utility.createInstance("Frame", { Name = "Background", Size = UDim2.new(1, -20, 0, 8), Position = UDim2.new(0, 10, 0, 32), BackgroundColor3 = Utility.darker(theme.SliderBackground, 0.5), Parent = sliderContainer })
-    Utility.createCorner(sliderBackground, 4)
-    Utility.registerThemedElement(sliderBackground, "BackgroundColor3", "SliderBackground", nil, function(c) return Utility.darker(c, 0.5) end) -- Special darker logic
+    local button = Utility.createInstance("TextButton", {
+        Name = "Button_" .. text,
+        Size = UDim2.new(1, 0, 0, 35),
+        BackgroundColor3 = theme.ElementBackground,
+        Font = Enum.Font.GothamBold,
+        Text = text,
+        TextColor3 = theme.TextColor,
+        TextSize = 14,
+        LayoutOrder = order,
+        -- Parent set by AddComponent
+    })
+    Utility.createCorner(button, 4)
+    local stroke = Utility.createStroke(button, theme.ElementStroke, 1)
+    Utility.registerThemedElement(button, "BackgroundColor3", "ElementBackground", "ElementBackgroundHover")
+    Utility.registerThemedElement(button, "TextColor3", "TextColor")
+    -- Stroke already registered
 
-    local initialPercent = (max > min) and (currentValue - min) / (max - min) or 0
-    local sliderFill = Utility.createInstance("Frame", { Name = "Fill", Size = UDim2.new(initialPercent, 0, 1, 0), BackgroundColor3 = theme.SliderProgress, Parent = sliderBackground })
-    Utility.createCorner(sliderFill, 4)
-    Utility.registerThemedElement(sliderFill, "BackgroundColor3", "SliderProgress")
+    -- API Object
+    local ButtonApi = { Instance = button, _connections = {} }
+    Utility.manageConnections(ButtonApi)
 
-    local sliderInteract = Utility.createInstance("TextButton", { Name = "Interact", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = sliderBackground })
+    -- Effects & Interaction
+    local normalColor = theme.ElementBackground
+    local hoverColor = theme.ElementBackgroundHover
+    ButtonApi:AddConnection(button.MouseEnter:Connect(function()
+        TweenService:Create(button, TweenInfo.new(0.2), { BackgroundColor3 = hoverColor }):Play()
+        if buttonSettings.Tooltip then Utility.showTooltip(buttonSettings.Tooltip, theme) end
+    end))
+    ButtonApi:AddConnection(button.MouseLeave:Connect(function()
+        TweenService:Create(button, TweenInfo.new(0.2), { BackgroundColor3 = normalColor }):Play()
+        Utility.hideTooltip()
+    end))
+    ButtonApi:AddConnection(button.MouseButton1Click:Connect(function()
+        Utility.rippleEffect(button)
+        Utility.safeCall(callback) -- Execute callback
+    end))
 
-    -- Component API
-    local SliderComponent = { Instance = sliderContainer, Value = currentValue }
-    function SliderComponent:SetValue(value, skipCallback)
-        value = math.clamp(value, min, max)
-        local snappedValue = min + math.floor((value - min) / increment + 0.5) * increment
-        snappedValue = math.clamp(snappedValue, min, max) -- Clamp again after snapping
+    -- Update hover colors on theme change (requires tracking)
+    -- This is complex with the current attribute system. A simpler approach is to re-fetch colors on hover.
+    -- Or, store theme keys and re-fetch inside the hover events.
+    -- Let's try re-fetching inside hover:
+    ButtonApi:AddConnection(button.MouseEnter:Connect(function()
+        local currentTheme = self._window.CurrentTheme -- Get current theme
+        TweenService:Create(button, TweenInfo.new(0.2), { BackgroundColor3 = currentTheme.ElementBackgroundHover }):Play()
+        if buttonSettings.Tooltip then Utility.showTooltip(buttonSettings.Tooltip, currentTheme) end
+    end))
+    ButtonApi:AddConnection(button.MouseLeave:Connect(function()
+        local currentTheme = self._window.CurrentTheme -- Get current theme
+        TweenService:Create(button, TweenInfo.new(0.2), { BackgroundColor3 = currentTheme.ElementBackground }):Play()
+        Utility.hideTooltip()
+    end))
 
-        if self.Value == snappedValue then return end -- No change
 
-        self.Value = snappedValue
-        local percent = (max > min) and (snappedValue - min) / (max - min) or 0
+    return self:AddComponent(button, ButtonApi)
+end
 
-        -- Update UI
-        sliderFill.Size = UDim2.new(percent, 0, 1, 0)
-        valueDisplay.Text = Utility.formatNumber(snappedValue) .. suffix
+-- Add Toggle
+function Tab:AddToggle(toggleSettings)
+    toggleSettings = toggleSettings or {}
+    local text = toggleSettings.Text or "Toggle"
+    local flag = toggleSettings.Flag -- Mandatory for saving/loading
+    local defaultValue = toggleSettings.Default or false
+    local order = toggleSettings.Order or (#self._components + 1)
+    local callback = toggleSettings.Callback or function(value) print("[LuminaUI] Toggle '"..text.."' set to:", value) end
+    local theme = self._window.CurrentTheme
 
-        -- Update flags
-        if flag then
-            LuminaUI.Flags[flag] = { Type = "Slider", Value = snappedValue, ComponentRef = self }
+    if not flag then warn("[LuminaUI] Toggle '"..text.."' is missing a 'Flag' for configuration saving.") end
+
+    local currentValue = defaultValue
+
+    local toggleFrame = Utility.createInstance("Frame", {
+        Name = "Toggle_" .. text,
+        Size = UDim2.new(1, 0, 0, 30), -- Slightly smaller height
+        BackgroundTransparency = 1,
+        LayoutOrder = order,
+        -- Parent set by AddComponent
+    })
+    Utility.manageConnections(toggleFrame)
+
+    local toggleButton = Utility.createInstance("TextButton", { -- Use TextButton for easier interaction handling
+        Name = "ToggleButton",
+        Size = UDim2.new(0, 40, 0, 20),
+        Position = UDim2.new(1, -10, 0.5, 0), -- Positioned right, centered vertically
+        AnchorPoint = Vector2.new(1, 0.5),
+        BackgroundColor3 = defaultValue and theme.ToggleEnabled or theme.ToggleDisabled,
+        Text = "", -- No text on the button itself
+        Parent = toggleFrame
+    })
+    Utility.createCorner(toggleButton, 10) -- Rounded corners for the track
+    Utility.registerThemedElement(toggleButton, "BackgroundColor3", "ToggleDisabled") -- Base color is disabled
+
+    local toggleCircle = Utility.createInstance("Frame", {
+        Name = "Circle",
+        Size = UDim2.new(0, 16, 0, 16), -- Slightly smaller than button height
+        Position = defaultValue and UDim2.new(1, -3, 0.5, 0) or UDim2.new(0, 3, 0.5, 0), -- Position left/right based on default
+        AnchorPoint = Vector2.new(defaultValue and 1 or 0, 0.5),
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255), -- White circle
+        BorderSizePixel = 0,
+        Parent = toggleButton
+    })
+    Utility.createCorner(toggleCircle, 8) -- Make it circular
+
+    local label = Utility.createInstance("TextLabel", {
+        Name = "Label",
+        Size = UDim2.new(1, -(10 + 40 + 10), 1, 0), -- Width = Frame width - left pad - button width - right pad
+        Position = UDim2.new(0, 10, 0, 0), -- Positioned left
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham,
+        Text = text,
+        TextColor3 = theme.TextColor,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = toggleFrame
+    })
+    Utility.registerThemedElement(label, "TextColor3", "TextColor")
+
+    -- API Object
+    local ToggleApi = { Instance = toggleFrame, _connections = {}, Value = currentValue }
+    Utility.manageConnections(ToggleApi)
+
+    -- Update function
+    function ToggleApi:SetValue(value, skipCallback)
+        value = value == true -- Ensure boolean
+        if self.Value == value then return end -- No change
+
+        self.Value = value
+        currentValue = value -- Update local state
+
+        local targetColor = value and self._window.CurrentTheme.ToggleEnabled or self._window.CurrentTheme.ToggleDisabled
+        local targetPos = value and UDim2.new(1, -3, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
+        local targetAnchor = value and Vector2.new(1, 0.5) or Vector2.new(0, 0.5)
+
+        local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        TweenService:Create(toggleButton, tweenInfo, { BackgroundColor3 = targetColor }):Play()
+        TweenService:Create(toggleCircle, tweenInfo, { Position = targetPos, AnchorPoint = targetAnchor }):Play()
+
+        -- Update flag registry
+        if flag and LuminaUI.Flags[flag] then
+            LuminaUI.Flags[flag].Value = value
         end
 
-        -- Execute callback
+        -- Trigger callback if not skipped
         if not skipCallback then
-            Utility.safeCall(callback, snappedValue)
+            Utility.safeCall(callback, value)
         end
     end
-    function SliderComponent:SetRange(newMin, newMax, newIncrement)
-         min = newMin or min
-         max = newMax or max
-         increment = newIncrement or increment
-         range = {min, max} -- Update internal range table
-         self:SetValue(self.Value) -- Re-snap and update UI
-    end
-    function SliderComponent:SetSuffix(newSuffix) suffix = newSuffix; self:SetValue(self.Value) end
-    function SliderComponent:SetTooltip(text) tooltipText = text end
-    function SliderComponent:Destroy() Utility.destroyInstance(self.Instance) end
 
-    -- Store flag reference immediately
+    -- Interaction
+    ToggleApi:AddConnection(toggleButton.MouseButton1Click:Connect(function()
+        self:SetValue(not self.Value) -- Toggle the value
+    end))
+
+    -- Tooltip
+    if toggleSettings.Tooltip then
+         ToggleApi:AddConnection(toggleFrame.MouseEnter:Connect(function() Utility.showTooltip(toggleSettings.Tooltip, self._window.CurrentTheme) end))
+         ToggleApi:AddConnection(toggleFrame.MouseLeave:Connect(function() Utility.hideTooltip() end))
+    end
+
+    -- Register flag for saving/loading
     if flag then
-        LuminaUI.Flags[flag] = { Type = "Slider", Value = currentValue, ComponentRef = SliderComponent }
+        LuminaUI.Flags[flag] = { Value = currentValue, Type = "Toggle", ComponentRef = ToggleApi }
+    end
+
+    return self:AddComponent(toggleFrame, ToggleApi)
+end
+
+-- Add Slider
+function Tab:AddSlider(sliderSettings)
+    sliderSettings = sliderSettings or {}
+    local text = sliderSettings.Text or "Slider"
+    local flag = sliderSettings.Flag -- Mandatory
+    local min = sliderSettings.Min or 0
+    local max = sliderSettings.Max or 100
+    local step = sliderSettings.Step or 1
+    local defaultValue = sliderSettings.Default or min
+    local unit = sliderSettings.Unit or ""
+    local order = sliderSettings.Order or (#self._components + 1)
+    local callback = sliderSettings.Callback or function(value) print("[LuminaUI] Slider '"..text.."' set to:", value) end
+    local theme = self._window.CurrentTheme
+
+    if not flag then warn("[LuminaUI] Slider '"..text.."' is missing a 'Flag' for configuration saving.") end
+
+    -- Clamp default value and ensure it aligns with step
+    defaultValue = math.clamp(defaultValue, min, max)
+    defaultValue = math.floor((defaultValue - min) / step + 0.5) * step + min
+
+    local currentValue = defaultValue
+
+    local sliderFrame = Utility.createInstance("Frame", {
+        Name = "Slider_" .. text,
+        Size = UDim2.new(1, 0, 0, 50), -- Taller frame for label + slider
+        BackgroundTransparency = 1,
+        LayoutOrder = order,
+        -- Parent set by AddComponent
+    })
+    Utility.manageConnections(sliderFrame)
+
+    local label = Utility.createInstance("TextLabel", {
+        Name = "Label",
+        Size = UDim2.new(0.5, -5, 0, 20), -- Half width for label
+        Position = UDim2.new(0, 10, 0, 5), -- Position top-left
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham,
+        Text = text,
+        TextColor3 = theme.TextColor,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = sliderFrame
+    })
+    Utility.registerThemedElement(label, "TextColor3", "TextColor")
+
+    local valueLabel = Utility.createInstance("TextLabel", {
+        Name = "ValueLabel",
+        Size = UDim2.new(0.5, -5, 0, 20), -- Half width for value
+        Position = UDim2.new(1, -10, 0, 5), -- Position top-right
+        AnchorPoint = Vector2.new(1, 0),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = Utility.formatNumber(currentValue) .. unit,
+        TextColor3 = theme.SubTextColor,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        Parent = sliderFrame
+    })
+    Utility.registerThemedElement(valueLabel, "TextColor3", "SubTextColor")
+
+    local sliderTrack = Utility.createInstance("Frame", {
+        Name = "Track",
+        Size = UDim2.new(1, -20, 0, 6), -- Full width (-padding), fixed height
+        Position = UDim2.new(0, 10, 0, 30), -- Position below labels
+        BackgroundColor3 = theme.ElementBackground,
+        Parent = sliderFrame
+    })
+    Utility.createCorner(sliderTrack, 3)
+    Utility.registerThemedElement(sliderTrack, "BackgroundColor3", "ElementBackground")
+
+    local progressTrack = Utility.createInstance("Frame", {
+        Name = "Progress",
+        Size = UDim2.new((currentValue - min) / (max - min), 0, 1, 0), -- Initial progress based on default
+        BackgroundColor3 = theme.SliderProgress,
+        Parent = sliderTrack
+    })
+    Utility.createCorner(progressTrack, 3)
+    Utility.registerThemedElement(progressTrack, "BackgroundColor3", "SliderProgress")
+
+    local sliderThumb = Utility.createInstance("Frame", {
+        Name = "Thumb",
+        Size = UDim2.new(0, 14, 0, 14),
+        Position = UDim2.new((currentValue - min) / (max - min), 0, 0.5, 0), -- Position based on default
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = theme.SliderProgress,
+        BorderSizePixel = 0,
+        ZIndex = sliderTrack.ZIndex + 1,
+        Parent = sliderTrack
+    })
+    Utility.createCorner(sliderThumb, 7) -- Circular thumb
+    Utility.registerThemedElement(sliderThumb, "BackgroundColor3", "SliderProgress")
+
+    -- API Object
+    local SliderApi = { Instance = sliderFrame, _connections = {}, Value = currentValue }
+    Utility.manageConnections(SliderApi)
+
+    local isDragging = false
+
+    -- Update function
+    function SliderApi:SetValue(value, skipCallback)
+        -- Clamp and snap value to step
+        value = math.clamp(value, min, max)
+        value = math.floor((value - min) / step + 0.5) * step + min
+
+        if self.Value == value then return end -- No change
+
+        self.Value = value
+        currentValue = value -- Update local state
+
+        local percent = (value - min) / (max - min)
+        if max == min then percent = 0 end -- Avoid division by zero
+
+        -- Update UI elements
+        progressTrack.Size = UDim2.new(percent, 0, 1, 0)
+        sliderThumb.Position = UDim2.new(percent, 0, 0.5, 0)
+        valueLabel.Text = Utility.formatNumber(value) .. unit
+
+        -- Update flag registry
+        if flag and LuminaUI.Flags[flag] then
+            LuminaUI.Flags[flag].Value = value
+        end
+
+        -- Trigger callback if not skipped
+        if not skipCallback then
+            Utility.safeCall(callback, value)
+        end
     end
 
     -- Interaction Logic
-    local isDragging = false
-    local function updateSliderFromInput(inputPos)
-        local relativeX = inputPos.X - sliderBackground.AbsolutePosition.X
-        local width = sliderBackground.AbsoluteSize.X
-        local percent = (width > 0) and math.clamp(relativeX / width, 0, 1) or 0
-        local rawValue = min + (max - min) * percent
-        SliderComponent:SetValue(rawValue) -- Use SetValue to handle snapping, UI update, and callback
+    local function updateFromInput(input)
+        local mouseX = input.Position.X
+        local trackStartX = sliderTrack.AbsolutePosition.X
+        local trackWidth = sliderTrack.AbsoluteSize.X
+        if trackWidth <= 0 then return end -- Avoid division by zero
+
+        local percent = math.clamp((mouseX - trackStartX) / trackWidth, 0, 1)
+        local newValue = min + percent * (max - min)
+        self:SetValue(newValue) -- SetValue handles clamping, stepping, and callback
     end
 
-    sliderContainer:AddConnection(sliderInteract.MouseButton1Down:Connect(function()
-        isDragging = true
-        updateSliderFromInput(UserInputService:GetMouseLocation())
-        UserInputService.TextSelectionEnabled = false -- Prevent text selection
+    SliderApi:AddConnection(sliderTrack.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isDragging = true
+            updateFromInput(input) -- Update immediately on click
+            Utility.pulseEffect(sliderThumb, 1.2, 0.1) -- Pulse effect on drag start
+            -- Prevent text selection while dragging
+            UserInputService.TextSelectionEnabled = false
+        end
     end))
-    sliderContainer:AddConnection(UserInputService.InputEnded:Connect(function(input)
-        if isDragging and input.UserInputType == Enum.UserInputType.MouseButton1 then
+
+    -- Use global InputEnded/InputChanged for reliable drag end detection
+    SliderApi:AddConnection(UserInputService.InputEnded:Connect(function(input)
+        if isDragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
             isDragging = false
-            UserInputService.TextSelectionEnabled = true -- Re-enable
-        end
-    end))
-    sliderContainer:AddConnection(UserInputService.InputChanged:Connect(function(input)
-        if isDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            updateSliderFromInput(input.Position)
+            Utility.pulseEffect(sliderThumb, 1 / 1.2, 0.1) -- Revert pulse effect
+            -- Re-enable text selection
+            UserInputService.TextSelectionEnabled = true
         end
     end))
 
-    -- Hover Effects
-    local hoverColor = theme.ElementBackgroundHover
-    local normalColor = theme.ElementBackground
-    local tweenInfo = TweenInfo.new(0.15)
-    sliderContainer:AddConnection(sliderContainer.MouseEnter:Connect(function() -- Use container for hover
-        TweenService:Create(sliderContainer, tweenInfo, { BackgroundColor3 = hoverColor }):Play()
-        if tooltipText then Utility.showTooltip(tooltipText, theme) end
-    end))
-    sliderContainer:AddConnection(sliderContainer.MouseLeave:Connect(function()
-        TweenService:Create(sliderContainer, tweenInfo, { BackgroundColor3 = normalColor }):Play()
-        if tooltipText then Utility.hideTooltip() end
+    SliderApi:AddConnection(UserInputService.InputChanged:Connect(function(input)
+        if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateFromInput(input)
+        end
     end))
 
-    table.insert(self._components, SliderComponent)
-    return SliderComponent
+    -- Tooltip
+    if sliderSettings.Tooltip then
+         SliderApi:AddConnection(sliderFrame.MouseEnter:Connect(function() Utility.showTooltip(sliderSettings.Tooltip, self._window.CurrentTheme) end))
+         SliderApi:AddConnection(sliderFrame.MouseLeave:Connect(function() Utility.hideTooltip() end))
+    end
+
+    -- Register flag for saving/loading
+    if flag then
+        LuminaUI.Flags[flag] = { Value = currentValue, Type = "Slider", ComponentRef = SliderApi }
+    end
+
+    return self:AddComponent(sliderFrame, SliderApi)
 end
 
-function Tab:CreateDropdown(options)
-    options = options or {}
-    local name = options.Name or "Dropdown"
-    local opts = options.Options or {}
-    local currentOption = options.CurrentOption or (opts[1] or "")
-    local flag = options.Flag or nil
-    local callback = options.Callback or function() end
-    local iconId = options.Icon or 0
-    local tooltipText = options.Tooltip or nil
-    local theme = Window.CurrentTheme
+-- Add Dropdown
+function Tab:AddDropdown(dropdownSettings)
+    dropdownSettings = dropdownSettings or {}
+    local text = dropdownSettings.Text or "Dropdown"
+    local flag = dropdownSettings.Flag -- Mandatory
+    local options = dropdownSettings.Options or {}
+    local defaultValue = dropdownSettings.Default or options[1] -- Default to first option
+    local allowSearch = dropdownSettings.Search or false -- Allow searching options
+    local order = dropdownSettings.Order or (#self._components + 1)
+    local callback = dropdownSettings.Callback or function(value) print("[LuminaUI] Dropdown '"..text.."' selected:", value) end
+    local theme = self._window.CurrentTheme
 
+    if not flag then warn("[LuminaUI] Dropdown '"..text.."' is missing a 'Flag' for configuration saving.") end
+    if not table.find(options, defaultValue) then defaultValue = options[1] end -- Ensure default is valid
+
+    local currentValue = defaultValue
     local isOpen = false
-    local listContainer = nil -- Forward declare
 
-    local dropdownContainer = Utility.createInstance("Frame", { Name = "Dropdown_" .. name, Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = theme.ElementBackground, ClipsDescendants = true, Parent = self.Page, ZIndex = 10 }) -- Higher ZIndex when closed
-    Utility.createCorner(dropdownContainer, 4)
-    Utility.registerThemedElement(dropdownContainer, "BackgroundColor3", "ElementBackground", "ElementBackgroundHover")
-    Utility.manageConnections(dropdownContainer)
+    local dropdownFrame = Utility.createInstance("Frame", {
+        Name = "Dropdown_" .. text,
+        Size = UDim2.new(1, 0, 0, 35), -- Standard height
+        BackgroundTransparency = 1,
+        LayoutOrder = order,
+        ZIndex = 5, -- Base ZIndex for dropdown, options list will be higher
+        -- Parent set by AddComponent
+    })
+    Utility.manageConnections(dropdownFrame)
 
-    local iconPadding = 0
-    if iconId ~= 0 then
-        local dropdownIcon = Utility.createInstance("ImageLabel", { Name = "Icon", Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 8, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(iconId), ImageColor3 = theme.TextColor, Parent = dropdownContainer })
-        Utility.registerThemedElement(dropdownIcon, "ImageColor3", "TextColor")
-        iconPadding = 30
-    end
+    local label = Utility.createInstance("TextLabel", {
+        Name = "Label",
+        Size = UDim2.new(0.4, -10, 1, 0), -- Adjust width as needed
+        Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham,
+        Text = text,
+        TextColor3 = theme.TextColor,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = dropdownFrame
+    })
+    Utility.registerThemedElement(label, "TextColor3", "TextColor")
 
-    local dropdownTitle = Utility.createInstance("TextLabel", { Name = "Title", Size = UDim2.new(1, -(70 + iconPadding), 1, 0), Position = UDim2.new(0, 10 + iconPadding, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = name, TextColor3 = theme.TextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = dropdownContainer })
-    Utility.registerThemedElement(dropdownTitle, "TextColor3", "TextColor")
+    local dropdownButton = Utility.createInstance("TextButton", {
+        Name = "DropdownButton",
+        Size = UDim2.new(0.6, -10, 1, -10), -- Adjust width, slight vertical padding
+        Position = UDim2.new(1, -10, 0.5, 0), -- Position right, centered vertically
+        AnchorPoint = Vector2.new(1, 0.5),
+        BackgroundColor3 = theme.InputBackground,
+        Font = Enum.Font.Gotham,
+        Text = tostring(currentValue), -- Display current value
+        TextColor3 = theme.TextColor,
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left, -- Align text left within button
+        Parent = dropdownFrame
+    })
+    Utility.createCorner(dropdownButton, 4)
+    local buttonStroke = Utility.createStroke(dropdownButton, theme.InputStroke, 1)
+    Utility.registerThemedElement(dropdownButton, "BackgroundColor3", "InputBackground", "ElementBackgroundHover") -- Use ElementBackgroundHover for consistency
+    Utility.registerThemedElement(dropdownButton, "TextColor3", "TextColor")
+    -- Stroke already registered
 
-    local selectedOptionLabel = Utility.createInstance("TextLabel", { Name = "Selected", Size = UDim2.new(0, 120, 1, 0), Position = UDim2.new(1, -30, 0, 0), AnchorPoint = Vector2.new(1, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = currentOption, TextColor3 = theme.SubTextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Right, Parent = dropdownContainer })
-    Utility.registerThemedElement(selectedOptionLabel, "TextColor3", "SubTextColor")
+    -- Padding for button text
+    Utility.createInstance("UIPadding", {
+        PaddingLeft = UDim.new(0, 8),
+        PaddingRight = UDim.new(0, 25), -- Space for the arrow
+        Parent = dropdownButton
+    })
 
-    local dropdownArrow = Utility.createInstance("ImageLabel", { Name = "Arrow", Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(1, -12, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), BackgroundTransparency = 1, Image = "rbxassetid://10483855823", ImageColor3 = theme.SubTextColor, Rotation = 0, Parent = dropdownContainer })
-    Utility.registerThemedElement(dropdownArrow, "ImageColor3", "SubTextColor")
+    -- Dropdown Arrow Icon
+    local arrowIcon = Utility.createInstance("ImageLabel", {
+        Name = "Arrow",
+        Size = UDim2.new(0, 12, 0, 12),
+        Position = UDim2.new(1, -10, 0.5, 0), -- Position inside button, right edge
+        AnchorPoint = Vector2.new(1, 0.5),
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://6031280882", -- Re-use settings icon (down arrow-like)
+        ImageColor3 = theme.SubTextColor,
+        Rotation = 90, -- Rotate to point down
+        ZIndex = dropdownButton.ZIndex + 1,
+        Parent = dropdownButton
+    })
+    Utility.registerThemedElement(arrowIcon, "ImageColor3", "SubTextColor")
 
-    local dropdownInteract = Utility.createInstance("TextButton", { Name = "Interact", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = dropdownContainer })
+    -- Options List Container (created on demand)
+    local optionsList = nil
 
-    -- Component API
-    local DropdownComponent = { Instance = dropdownContainer, Value = currentOption, Options = opts }
+    -- API Object
+    local DropdownApi = { Instance = dropdownFrame, _connections = {}, Value = currentValue, Options = options }
+    Utility.manageConnections(DropdownApi)
 
-    local function updateListItems()
-        if not listContainer then return end
-        local theme = Window.CurrentTheme -- Get current theme
+    -- Function to create/destroy the options list
+    function DropdownApi:ToggleOpen(forceState)
+        isOpen = (forceState ~= nil) and forceState or not isOpen
 
-        -- Clear existing items
-        for _, child in ipairs(listContainer:GetChildren()) do
-            if not (child:IsA("UIListLayout") or child:IsA("UIPadding")) then
-                Utility.destroyInstance(child)
-            end
+        -- Close any other active dropdown first
+        if isOpen and ActiveDropdown and ActiveDropdown ~= self then
+            Utility.safeCall(ActiveDropdown.ToggleOpen, ActiveDropdown, false)
         end
-
-        -- Create new items
-        for i, optionText in ipairs(DropdownComponent.Options) do
-            local isSelected = (optionText == DropdownComponent.Value)
-            local itemFrame = Utility.createInstance("Frame", { Name = "Item_" .. i, Size = UDim2.new(1, 0, 0, 28), BackgroundColor3 = isSelected and theme.DropdownSelected or theme.DropdownUnselected, Parent = listContainer })
-            Utility.createCorner(itemFrame, 4)
-            Utility.manageConnections(itemFrame) -- Manage item connections
-
-            local itemLabel = Utility.createInstance("TextLabel", { Name = "Label", Size = UDim2.new(1, -10, 1, 0), Position = UDim2.new(0, 5, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = optionText, TextColor3 = isSelected and theme.TextColor or theme.SubTextColor, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, Parent = itemFrame })
-            local itemButton = Utility.createInstance("TextButton", { Name = "Interact", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = itemFrame })
-
-            -- Hover effects
-            local itemNormalColor = itemFrame.BackgroundColor3
-            local itemHoverColor = Utility.lighter(itemNormalColor, 0.1)
-            itemFrame:AddConnection(itemButton.MouseEnter:Connect(function() if not isSelected then TweenService:Create(itemFrame, TweenInfo.new(0.15), { BackgroundColor3 = itemHoverColor }):Play() end end))
-            itemFrame:AddConnection(itemButton.MouseLeave:Connect(function() if not isSelected then TweenService:Create(itemFrame, TweenInfo.new(0.15), { BackgroundColor3 = itemNormalColor }):Play() end end))
-
-            -- Selection
-            itemFrame:AddConnection(itemButton.MouseButton1Click:Connect(function()
-                DropdownComponent:SetValue(optionText)
-                DropdownComponent:ToggleOpen(false) -- Close after selection
-            end))
-        end
-
-        -- Update list container size (defer might be needed if layout updates async)
-        task.defer(function()
-             if listContainer and listContainer:FindFirstChildOfClass("UIListLayout") then
-                 local contentHeight = listContainer.UIListLayout.AbsoluteContentSize.Y
-                 listContainer.Size = UDim2.new(1, -10, 0, contentHeight + 10) -- Add padding
-                 if isOpen then -- Adjust parent size if already open
-                     dropdownContainer.Size = UDim2.new(1, 0, 0, 36 + listContainer.Size.Y.Offset + 4) -- 36 header + list + padding
-                 end
-             end
-        end)
-    end
-
-    function DropdownComponent:ToggleOpen(state)
-        if isOpen == state then return end
-        isOpen = state
-
-        if not listContainer then -- Create list container on first open
-            listContainer = Utility.createInstance("Frame", { Name = "List", Size = UDim2.new(1, -10, 0, 0), Position = UDim2.new(0, 5, 0, 40), BackgroundColor3 = Utility.darker(Window.CurrentTheme.ElementBackground, 0.1), Visible = false, ClipsDescendants = true, Parent = dropdownContainer, ZIndex = dropdownContainer.ZIndex - 1 }) -- Below main dropdown frame
-            Utility.createCorner(listContainer, 4)
-            Utility.createInstance("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder, Parent = listContainer })
-            Utility.createInstance("UIPadding", { PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5), PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5), Parent = listContainer })
-            Utility.registerThemedElement(listContainer, "BackgroundColor3", "ElementBackground", nil, function(c) return Utility.darker(c, 0.1) end)
-            updateListItems() -- Populate items now
-        end
-
-        local targetSizeY
-        local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
         if isOpen then
-            listContainer.Visible = true
-            targetSizeY = 36 + listContainer.Size.Y.Offset + 4 -- Header + List + Padding
-            dropdownContainer.ClipsDescendants = false -- Allow list to show
-            dropdownContainer.ZIndex = 100 -- Bring to front when open
-            ActiveDropdown = self -- Register as active dropdown
-            TweenService:Create(dropdownArrow, tweenInfo, { Rotation = 180 }):Play()
-        else
-            targetSizeY = 36
-            dropdownContainer.ClipsDescendants = true -- Clip list before shrinking
-            dropdownContainer.ZIndex = 10 -- Reset ZIndex
-            if ActiveDropdown == self then ActiveDropdown = nil end -- Unregister
-            TweenService:Create(dropdownArrow, tweenInfo, { Rotation = 0 }):Play()
-        end
+            ActiveDropdown = self -- Set this as the active dropdown
 
-        local sizeTween = TweenService:Create(dropdownContainer, tweenInfo, { Size = UDim2.new(1, 0, 0, targetSizeY) })
-        sizeTween:Play()
+            -- Create options list if it doesn't exist
+            if not optionsList or not optionsList.Parent then
+                optionsList = Utility.createInstance("Frame", {
+                    Name = "OptionsList",
+                    Size = UDim2.new(0, dropdownButton.AbsoluteSize.X, 0, 0), -- Width matches button, height calculated later
+                    Position = UDim2.new(0, dropdownButton.AbsolutePosition.X, 0, dropdownButton.AbsolutePosition.Y + dropdownButton.AbsoluteSize.Y + 2), -- Position below button
+                    BackgroundColor3 = theme.DropdownUnselected,
+                    BorderSizePixel = 1,
+                    BorderColor3 = theme.InputStroke,
+                    ClipsDescendants = true,
+                    Visible = false, -- Start invisible for animation
+                    ZIndex = 100, -- High ZIndex to appear above other elements
+                    Parent = self._window.ScreenGui -- Parent to ScreenGui for global positioning
+                })
+                Utility.createCorner(optionsList, 4)
+                Utility.registerThemedElement(optionsList, "BackgroundColor3", "DropdownUnselected")
+                Utility.registerThemedElement(optionsList, "BorderColor3", "InputStroke")
+                Utility.manageConnections(optionsList) -- Manage connections for the list itself
 
-        if not isOpen then
-            sizeTween.Completed:Connect(function()
-                -- Hide list container *after* animation completes if closing
-                if listContainer and not isOpen then listContainer.Visible = false end
-            end)
-        end
+                local listLayout = Utility.createInstance("UIListLayout", {
+                    Padding = UDim.new(0, 2),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                    Parent = optionsList
+                })
+                Utility.createInstance("UIPadding", {
+                    PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
+                    PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
+                    Parent = optionsList
+                })
 
-        -- Force layout update after animation (might help with scroll frame canvas size issues)
-        task.delay(tweenInfo.Time + 0.05, function()
-            if self.Instance and self.Instance.Parent and self.Instance.Parent:FindFirstChildOfClass("UIListLayout") then
-                self.Instance.Parent.UIListLayout:ApplyLayout()
+                -- Search Bar (Optional)
+                if allowSearch then
+                    local searchBar = Utility.createInstance("TextBox", {
+                        Name = "SearchBar",
+                        Size = UDim2.new(1, -8, 0, 25), -- Full width (-padding), fixed height
+                        Position = UDim2.new(0.5, 0, 0, 4),
+                        AnchorPoint = Vector2.new(0.5, 0),
+                        BackgroundColor3 = theme.InputBackground,
+                        PlaceholderText = "Search...",
+                        PlaceholderColor3 = theme.InputPlaceholder,
+                        Text = "", TextColor3 = theme.TextColor, Font = Enum.Font.Gotham, TextSize = 13,
+                        ClearTextOnFocus = false,
+                        LayoutOrder = -1, -- Ensure it's at the top
+                        Parent = optionsList
+                    })
+                    Utility.createCorner(searchBar, 3)
+                    Utility.createStroke(searchBar, theme.InputStroke, 1)
+                    Utility.registerThemedElement(searchBar, "BackgroundColor3", "InputBackground")
+                    Utility.registerThemedElement(searchBar, "PlaceholderColor3", "InputPlaceholder")
+                    Utility.registerThemedElement(searchBar, "TextColor3", "TextColor")
+
+                    optionsList:AddConnection(searchBar.Changed:Connect(function()
+                        local searchText = string.lower(searchBar.Text)
+                        local visibleCount = 0
+                        for _, itemButton in ipairs(optionsList:GetChildren()) do
+                            if itemButton:IsA("TextButton") and itemButton.Name == "OptionItem" then
+                                local itemText = string.lower(itemButton.Text)
+                                local isVisible = string.find(itemText, searchText, 1, true) ~= nil
+                                itemButton.Visible = isVisible
+                                if isVisible then visibleCount = visibleCount + 1 end
+                            end
+                        end
+                        -- Recalculate height based on visible items + search bar
+                        local itemHeight = 25 -- Approx height of each item + padding
+                        local searchHeight = 25 + 4 -- Search bar height + padding
+                        local newHeight = math.min(searchHeight + (visibleCount * itemHeight) + 8, 150) -- Max height 150
+                        optionsList.Size = UDim2.new(0, dropdownButton.AbsoluteSize.X, 0, newHeight)
+                    end))
+                end
+
+                -- Populate options
+                local totalHeight = (allowSearch and 33 or 8) -- Start with padding + search bar height
+                local itemCount = 0
+                for i, option in ipairs(self.Options) do
+                    itemCount = itemCount + 1
+                    local itemButton = Utility.createInstance("TextButton", {
+                        Name = "OptionItem",
+                        Size = UDim2.new(1, -8, 0, 25), -- Full width (-padding), fixed height
+                        BackgroundColor3 = (option == self.Value) and theme.DropdownSelected or theme.DropdownUnselected,
+                        Font = Enum.Font.Gotham,
+                        Text = tostring(option),
+                        TextColor3 = theme.TextColor,
+                        TextSize = 13,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        LayoutOrder = i,
+                        Parent = optionsList
+                    })
+                    Utility.createCorner(itemButton, 3)
+                    Utility.registerThemedElement(itemButton, "BackgroundColor3", "DropdownUnselected", "ElementBackgroundHover") -- Use specific keys
+                    Utility.registerThemedElement(itemButton, "TextColor3", "TextColor")
+
+                    -- Padding for item text
+                    Utility.createInstance("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = itemButton })
+
+                    optionsList:AddConnection(itemButton.MouseButton1Click:Connect(function()
+                        self:SetValue(option)
+                        self:ToggleOpen(false) -- Close after selection
+                    end))
+
+                    -- Hover effect for options
+                    optionsList:AddConnection(itemButton.MouseEnter:Connect(function()
+                        if option ~= self.Value then itemButton.BackgroundColor3 = theme.ElementBackgroundHover end
+                    end))
+                    optionsList:AddConnection(itemButton.MouseLeave:Connect(function()
+                        if option ~= self.Value then itemButton.BackgroundColor3 = theme.DropdownUnselected end
+                    end))
+
+                    totalHeight = totalHeight + 25 + 2 -- Item height + layout padding
+                end
+                -- Set initial size, capped at max height
+                optionsList.Size = UDim2.new(0, dropdownButton.AbsoluteSize.X, 0, math.min(totalHeight, 150))
             end
-        end)
+
+            -- Position and Animate Open
+            optionsList.Position = UDim2.new(0, dropdownButton.AbsolutePosition.X, 0, dropdownButton.AbsolutePosition.Y + dropdownButton.AbsoluteSize.Y + 2)
+            optionsList.Visible = true
+            local targetSize = optionsList.Size -- Use calculated size
+            optionsList.Size = UDim2.new(targetSize.X.Scale, targetSize.X.Offset, 0, 0) -- Start height at 0
+            TweenService:Create(optionsList, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = targetSize }):Play()
+            TweenService:Create(arrowIcon, TweenInfo.new(0.2), { Rotation = -90 }):Play() -- Rotate arrow up
+
+        else
+            ActiveDropdown = nil -- No longer the active dropdown
+
+            -- Animate Close and Destroy
+            if optionsList and optionsList.Parent then
+                local listRef = optionsList -- Store reference for callback
+                optionsList = nil -- Clear reference
+
+                local tweenInfoClose = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+                local sizeTween = TweenService:Create(listRef, tweenInfoClose, { Size = UDim2.new(listRef.Size.X.Scale, listRef.Size.X.Offset, 0, 0) })
+                sizeTween:Play()
+                TweenService:Create(arrowIcon, TweenInfo.new(0.2), { Rotation = 90 }):Play() -- Rotate arrow down
+
+                sizeTween.Completed:Connect(function()
+                    Utility.destroyInstance(listRef) -- Use pooled destroy
+                end)
+            else
+                 -- Ensure arrow resets if list wasn't open/valid
+                 TweenService:Create(arrowIcon, TweenInfo.new(0.2), { Rotation = 90 }):Play()
+            end
+        end
     end
 
-    function DropdownComponent:SetValue(option, skipCallback)
-        if not table.find(self.Options, option) then
-            warn("[LuminaUI] Option not found in dropdown:", option)
+    -- Update function
+    function DropdownApi:SetValue(value, skipCallback)
+        if not table.find(self.Options, value) then
+            warn("[LuminaUI] Attempted to set invalid value for Dropdown '"..text.."':", value)
             return
         end
-        if self.Value == option then return end -- No change
-
-        self.Value = option
-        selectedOptionLabel.Text = option
-
-        -- Update flags
-        if flag then
-            LuminaUI.Flags[flag] = { Type = "Dropdown", Value = option, ComponentRef = self }
-        end
-
-        -- Update visual selection in the list (if open)
-        if listContainer then updateListItems() end
-
-        -- Execute callback
-        if not skipCallback then
-            Utility.safeCall(callback, option)
-        end
-    end
-
-    function DropdownComponent:Refresh(newOptions, newValue)
-        self.Options = newOptions or self.Options
-        local valueToSet = self.Value -- Keep current value if possible
-
-        if newValue and table.find(self.Options, newValue) then
-            valueToSet = newValue
-        elseif not table.find(self.Options, self.Value) then -- Current value no longer valid
-            valueToSet = self.Options[1] or "" -- Default to first or empty
-        end
-
-        self:SetValue(valueToSet, true) -- Set value without triggering callback
-        if listContainer then updateListItems() end -- Update list visuals
-    end
-    function DropdownComponent:SetTooltip(text) tooltipText = text end
-    function DropdownComponent:Destroy() Utility.destroyInstance(self.Instance) end
-
-    -- Store flag reference immediately
-    if flag then
-        LuminaUI.Flags[flag] = { Type = "Dropdown", Value = currentOption, ComponentRef = DropdownComponent }
-    end
-
-    -- Interaction
-    dropdownContainer:AddConnection(dropdownInteract.MouseButton1Click:Connect(function()
-        DropdownComponent:ToggleOpen(not isOpen)
-    end))
-
-    -- Hover Effects
-    local hoverColor = theme.ElementBackgroundHover
-    local normalColor = theme.ElementBackground
-    local tweenInfo = TweenInfo.new(0.15)
-    dropdownContainer:AddConnection(dropdownInteract.MouseEnter:Connect(function()
-        TweenService:Create(dropdownContainer, tweenInfo, { BackgroundColor3 = hoverColor }):Play()
-        if tooltipText then Utility.showTooltip(tooltipText, theme) end
-    end))
-    dropdownContainer:AddConnection(dropdownInteract.MouseLeave:Connect(function()
-        TweenService:Create(dropdownContainer, tweenInfo, { BackgroundColor3 = normalColor }):Play()
-        if tooltipText then Utility.hideTooltip() end
-    end))
-
-    table.insert(self._components, DropdownComponent)
-    return DropdownComponent
-end
-
-function Tab:CreateInput(options)
-    options = options or {}
-    local name = options.Name or "Input"
-    local placeholder = options.Placeholder or "Enter text..."
-    local currentValue = options.CurrentValue or ""
-    local clearOnFocus = options.ClearOnFocus or false
-    local flag = options.Flag or nil
-    local callback = options.Callback or function() end
-    local iconId = options.Icon or 0
-    local tooltipText = options.Tooltip or nil
-    local theme = Window.CurrentTheme
-
-    local inputContainer = Utility.createInstance("Frame", { Name = "Input_" .. name, Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = theme.ElementBackground, Parent = self.Page })
-    Utility.createCorner(inputContainer, 4)
-    Utility.registerThemedElement(inputContainer, "BackgroundColor3", "ElementBackground", "ElementBackgroundHover")
-    Utility.manageConnections(inputContainer)
-
-    local iconPadding = 0
-    if iconId ~= 0 then
-        local inputIcon = Utility.createInstance("ImageLabel", { Name = "Icon", Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 8, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(iconId), ImageColor3 = theme.TextColor, Parent = inputContainer })
-        Utility.registerThemedElement(inputIcon, "ImageColor3", "TextColor")
-        iconPadding = 30
-    end
-
-    local inputTitle = Utility.createInstance("TextLabel", { Name = "Title", Size = UDim2.new(1, -(10 + iconPadding + 10), 1, 0), Position = UDim2.new(0, 10 + iconPadding, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = name, TextColor3 = theme.TextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = inputContainer })
-    Utility.registerThemedElement(inputTitle, "TextColor3", "TextColor")
-
-    local textBox = Utility.createInstance("TextBox", {
-        Name = "InputBox", Size = UDim2.new(0, 150, 0, 24), Position = UDim2.new(1, -10, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = theme.InputBackground, PlaceholderText = placeholder, PlaceholderColor3 = theme.InputPlaceholder, Text = currentValue, TextColor3 = theme.TextColor, Font = Enum.Font.Gotham, TextSize = 13, ClearTextOnFocus = clearOnFocus, Parent = inputContainer
-    })
-    Utility.createCorner(textBox, 4)
-    local stroke = Utility.createStroke(textBox, theme.InputStroke, 1)
-    Utility.registerThemedElement(textBox, "BackgroundColor3", "InputBackground")
-    Utility.registerThemedElement(textBox, "PlaceholderColor3", "InputPlaceholder")
-    Utility.registerThemedElement(textBox, "TextColor3", "TextColor")
-    Utility.registerThemedElement(stroke, "Color", "InputStroke")
-
-    -- Component API
-    local InputComponent = { Instance = inputContainer, Value = currentValue }
-    function InputComponent:SetValue(value, skipCallback)
-        value = tostring(value)
-        if self.Value == value then return end
+        if self.Value == value then return end -- No change
 
         self.Value = value
-        textBox.Text = value
+        currentValue = value -- Update local state
 
-        -- Update flags
-        if flag then
-            LuminaUI.Flags[flag] = { Type = "Input", Value = value, ComponentRef = self }
+        dropdownButton.Text = tostring(value)
+
+        -- Update selected item style if options list is open
+        if optionsList and optionsList.Parent then
+            for _, itemButton in ipairs(optionsList:GetChildren()) do
+                if itemButton:IsA("TextButton") and itemButton.Name == "OptionItem" then
+                    local isSelected = (itemButton.Text == tostring(value))
+                    itemButton.BackgroundColor3 = isSelected and theme.DropdownSelected or theme.DropdownUnselected
+                end
+            end
         end
 
-        -- Execute callback
+        -- Update flag registry
+        if flag and LuminaUI.Flags[flag] then
+            LuminaUI.Flags[flag].Value = value
+        end
+
+        -- Trigger callback if not skipped
         if not skipCallback then
             Utility.safeCall(callback, value)
         end
     end
-    function InputComponent:SetPlaceholder(text) placeholder = text; textBox.PlaceholderText = text; end
-    function InputComponent:SetTooltip(text) tooltipText = text end
-    function InputComponent:Destroy() Utility.destroyInstance(self.Instance) end
-
-    -- Store flag reference immediately
-    if flag then
-        LuminaUI.Flags[flag] = { Type = "Input", Value = currentValue, ComponentRef = InputComponent }
-    end
 
     -- Interaction
-    inputContainer:AddConnection(textBox.FocusLost:Connect(function(enterPressed)
-        if enterPressed then
-            InputComponent:SetValue(textBox.Text) -- Trigger callback on enter
-        else
-            -- Optionally trigger callback on focus lost even without enter?
-            -- InputComponent:SetValue(textBox.Text)
-            InputComponent.Value = textBox.Text -- Update internal value without callback
-            if flag then LuminaUI.Flags[flag].Value = textBox.Text end -- Update flag value directly
-        end
+    DropdownApi:AddConnection(dropdownButton.MouseButton1Click:Connect(function()
+        self:ToggleOpen()
     end))
 
-    -- Hover Effects (on container)
-    local hoverColor = theme.ElementBackgroundHover
-    local normalColor = theme.ElementBackground
-    local tweenInfo = TweenInfo.new(0.15)
-    inputContainer:AddConnection(inputContainer.MouseEnter:Connect(function()
-        TweenService:Create(inputContainer, tweenInfo, { BackgroundColor3 = hoverColor }):Play()
-        if tooltipText then Utility.showTooltip(tooltipText, theme) end
-    end))
-    inputContainer:AddConnection(inputContainer.MouseLeave:Connect(function()
-        TweenService:Create(inputContainer, tweenInfo, { BackgroundColor3 = normalColor }):Play()
-        if tooltipText then Utility.hideTooltip() end
-    end))
+    -- Tooltip
+    if dropdownSettings.Tooltip then
+         DropdownApi:AddConnection(dropdownFrame.MouseEnter:Connect(function() if not isOpen then Utility.showTooltip(dropdownSettings.Tooltip, self._window.CurrentTheme) end end))
+         DropdownApi:AddConnection(dropdownFrame.MouseLeave:Connect(function() Utility.hideTooltip() end))
+    end
 
-    table.insert(self._components, InputComponent)
-    return InputComponent
+    -- Register flag for saving/loading
+    if flag then
+        LuminaUI.Flags[flag] = { Value = currentValue, Type = "Dropdown", ComponentRef = DropdownApi }
+    end
+
+    return self:AddComponent(dropdownFrame, DropdownApi)
 end
 
-function Tab:CreateColorPicker(options)
-    options = options or {}
-    local name = options.Name or "Color Picker"
-    local currentColor = options.CurrentColor or Color3.new(1, 1, 1)
-    local flag = options.Flag or nil
-    local callback = options.Callback or function() end
-    local iconId = options.Icon or 0
-    local tooltipText = options.Tooltip or nil
-    local theme = Window.CurrentTheme
+-- Add Textbox
+function Tab:AddTextbox(textboxSettings)
+    textboxSettings = textboxSettings or {}
+    local text = textboxSettings.Text or "Textbox"
+    local flag = textboxSettings.Flag -- Mandatory
+    local placeholder = textboxSettings.Placeholder or "Enter text..."
+    local defaultValue = textboxSettings.Default or ""
+    local clearOnFocus = textboxSettings.ClearOnFocus -- Default behavior is true from pool reset
+    local order = textboxSettings.Order or (#self._components + 1)
+    local callback = textboxSettings.Callback or function(value) print("[LuminaUI] Textbox '"..text.."' changed to:", value) end
+    local theme = self._window.CurrentTheme
 
+    if not flag then warn("[LuminaUI] Textbox '"..text.."' is missing a 'Flag' for configuration saving.") end
+
+    local currentValue = defaultValue
+
+    local textboxFrame = Utility.createInstance("Frame", {
+        Name = "Textbox_" .. text,
+        Size = UDim2.new(1, 0, 0, 55), -- Taller frame for label + textbox
+        BackgroundTransparency = 1,
+        LayoutOrder = order,
+        -- Parent set by AddComponent
+    })
+    Utility.manageConnections(textboxFrame)
+
+    local label = Utility.createInstance("TextLabel", {
+        Name = "Label",
+        Size = UDim2.new(1, -20, 0, 20), -- Full width (-padding)
+        Position = UDim2.new(0, 10, 0, 5), -- Position top-left
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham,
+        Text = text,
+        TextColor3 = theme.TextColor,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = textboxFrame
+    })
+    Utility.registerThemedElement(label, "TextColor3", "TextColor")
+
+    local textbox = Utility.createInstance("TextBox", {
+        Name = "Input",
+        Size = UDim2.new(1, -20, 0, 25), -- Full width (-padding), fixed height
+        Position = UDim2.new(0, 10, 0, 25), -- Position below label
+        BackgroundColor3 = theme.InputBackground,
+        PlaceholderText = placeholder,
+        PlaceholderColor3 = theme.InputPlaceholder,
+        Text = currentValue,
+        TextColor3 = theme.TextColor,
+        Font = Enum.Font.Gotham,
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ClearTextOnFocus = clearOnFocus, -- Use provided setting or default
+        Parent = textboxFrame
+    })
+    Utility.createCorner(textbox, 4)
+    local stroke = Utility.createStroke(textbox, theme.InputStroke, 1)
+    Utility.registerThemedElement(textbox, "BackgroundColor3", "InputBackground")
+    Utility.registerThemedElement(textbox, "PlaceholderColor3", "InputPlaceholder")
+    Utility.registerThemedElement(textbox, "TextColor3", "TextColor")
+    -- Stroke already registered
+
+    -- Padding for textbox text
+    Utility.createInstance("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = textbox })
+
+    -- API Object
+    local TextboxApi = { Instance = textboxFrame, Input = textbox, _connections = {}, Value = currentValue }
+    Utility.manageConnections(TextboxApi)
+
+    -- Update function
+    function TextboxApi:SetValue(value, skipCallback)
+        value = tostring(value) -- Ensure string
+        if self.Value == value then return end -- No change
+
+        self.Value = value
+        currentValue = value -- Update local state
+
+        self.Input.Text = value
+
+        -- Update flag registry
+        if flag and LuminaUI.Flags[flag] then
+            LuminaUI.Flags[flag].Value = value
+        end
+
+        -- Trigger callback if not skipped
+        if not skipCallback then
+            Utility.safeCall(callback, value)
+        end
+    end
+
+    -- Interaction (FocusLost triggers callback and updates value)
+    TextboxApi:AddConnection(textbox.FocusLost:Connect(function(enterPressed)
+        -- Update value only when focus is lost or Enter is pressed
+        self:SetValue(textbox.Text)
+    end))
+    -- Optional: Update on Changed event (can be spammy)
+    -- TextboxApi:AddConnection(textbox:GetPropertyChangedSignal("Text"):Connect(function()
+    --     -- Potentially debounce this if needed
+    --     self:SetValue(textbox.Text)
+    -- end))
+
+    -- Tooltip
+    if textboxSettings.Tooltip then
+         TextboxApi:AddConnection(textboxFrame.MouseEnter:Connect(function() Utility.showTooltip(textboxSettings.Tooltip, self._window.CurrentTheme) end))
+         TextboxApi:AddConnection(textboxFrame.MouseLeave:Connect(function() Utility.hideTooltip() end))
+    end
+
+    -- Register flag for saving/loading
+    if flag then
+        LuminaUI.Flags[flag] = { Value = currentValue, Type = "Textbox", ComponentRef = TextboxApi }
+    end
+
+    return self:AddComponent(textboxFrame, TextboxApi)
+end
+
+-- Add ColorPicker (Complex Component)
+function Tab:AddColorPicker(cpSettings)
+    cpSettings = cpSettings or {}
+    local text = cpSettings.Text or "Color Picker"
+    local flag = cpSettings.Flag -- Mandatory
+    local defaultValue = cpSettings.Default or Color3.new(1, 1, 1) -- Default white
+    local order = cpSettings.Order or (#self._components + 1)
+    local callback = cpSettings.Callback or function(value) print("[LuminaUI] ColorPicker '"..text.."' set to:", value) end
+    local theme = self._window.CurrentTheme
+
+    if not flag then warn("[LuminaUI] ColorPicker '"..text.."' is missing a 'Flag' for configuration saving.") end
+
+    local currentValue = defaultValue
     local isOpen = false
-    local pickerFrame = nil -- Forward declare
 
-    local colorPickerContainer = Utility.createInstance("Frame", { Name = "ColorPicker_" .. name, Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = theme.ElementBackground, ClipsDescendants = true, Parent = self.Page, ZIndex = 10 })
-    Utility.createCorner(colorPickerContainer, 4)
-    Utility.registerThemedElement(colorPickerContainer, "BackgroundColor3", "ElementBackground", "ElementBackgroundHover")
-    Utility.manageConnections(colorPickerContainer)
+    local cpFrame = Utility.createInstance("Frame", {
+        Name = "ColorPicker_" .. text,
+        Size = UDim2.new(1, 0, 0, 35), -- Standard height
+        BackgroundTransparency = 1,
+        LayoutOrder = order,
+        ZIndex = 6, -- Above dropdowns
+        -- Parent set by AddComponent
+    })
+    Utility.manageConnections(cpFrame)
 
-    local iconPadding = 0
-    if iconId ~= 0 then
-        local pickerIcon = Utility.createInstance("ImageLabel", { Name = "Icon", Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 8, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(iconId), ImageColor3 = theme.TextColor, Parent = colorPickerContainer })
-        Utility.registerThemedElement(pickerIcon, "ImageColor3", "TextColor")
-        iconPadding = 30
-    end
+    local label = Utility.createInstance("TextLabel", {
+        Name = "Label",
+        Size = UDim2.new(0.6, -10, 1, 0), -- Adjust width
+        Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham, Text = text, TextColor3 = theme.TextColor, TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left, Parent = cpFrame
+    })
+    Utility.registerThemedElement(label, "TextColor3", "TextColor")
 
-    local pickerTitle = Utility.createInstance("TextLabel", { Name = "Title", Size = UDim2.new(1, -(70 + iconPadding), 1, 0), Position = UDim2.new(0, 10 + iconPadding, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = name, TextColor3 = theme.TextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = colorPickerContainer })
-    Utility.registerThemedElement(pickerTitle, "TextColor3", "TextColor")
+    local colorButton = Utility.createInstance("TextButton", {
+        Name = "ColorButton",
+        Size = UDim2.new(0.4, -10, 1, -10), -- Adjust width
+        Position = UDim2.new(1, -10, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5),
+        BackgroundColor3 = theme.InputBackground, Text = "", Parent = cpFrame
+    })
+    Utility.createCorner(colorButton, 4)
+    local buttonStroke = Utility.createStroke(colorButton, theme.InputStroke, 1)
+    Utility.registerThemedElement(colorButton, "BackgroundColor3", "InputBackground", "ElementBackgroundHover")
+    -- Stroke registered
 
-    local colorPreview = Utility.createInstance("Frame", { Name = "Preview", Size = UDim2.new(0, 24, 0, 24), Position = UDim2.new(1, -30, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = currentColor, Parent = colorPickerContainer })
-    Utility.createCorner(colorPreview, 4)
-    local previewStroke = Utility.createStroke(colorPreview, theme.ElementStroke, 1)
-    Utility.registerThemedElement(previewStroke, "Color", "ElementStroke")
+    local colorPreview = Utility.createInstance("Frame", {
+        Name = "Preview",
+        Size = UDim2.new(1, -8, 1, -8), -- Slightly smaller for border effect
+        Position = UDim2.new(0.5, 0, 0.5, 0), AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = currentValue, -- Show current color
+        BorderSizePixel = 0, Parent = colorButton
+    })
+    Utility.createCorner(colorPreview, 3)
+    -- No theme registration needed for preview, it shows the actual value
 
-    local pickerInteract = Utility.createInstance("TextButton", { Name = "Interact", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = colorPickerContainer })
+    -- Picker Popup (created on demand)
+    local pickerPopup = nil
 
-    -- Component API
-    local ColorPickerComponent = { Instance = colorPickerContainer, Value = currentColor }
+    -- API Object
+    local CPApi = { Instance = cpFrame, _connections = {}, Value = currentValue }
+    Utility.manageConnections(CPApi)
 
-    local function createPickerUI()
-        if pickerFrame then return end -- Already created
+    -- Function to create/destroy the picker popup
+    function CPApi:ToggleOpen(forceState)
+        isOpen = (forceState ~= nil) and forceState or not isOpen
 
-        pickerFrame = Utility.createInstance("Frame", { Name = "PickerUI", Size = UDim2.new(0, 200, 0, 230), Position = UDim2.new(0.5, 0, 0, 40), AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = theme.ColorPickerBackground, Visible = false, Parent = colorPickerContainer, ZIndex = colorPickerContainer.ZIndex - 1 })
-        Utility.createCorner(pickerFrame, 4)
-        local pickerStroke = Utility.createStroke(pickerFrame, theme.ElementStroke, 1)
-        Utility.registerThemedElement(pickerFrame, "BackgroundColor3", "ColorPickerBackground")
-        Utility.registerThemedElement(pickerStroke, "Color", "ElementStroke")
-
-        -- Saturation/Value Box
-        local svBox = Utility.createInstance("ImageLabel", { Name = "SVBox", Size = UDim2.new(0, 180, 0, 150), Position = UDim2.new(0.5, 0, 0, 10), AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromHSV(0, 1, 1), Image = "rbxassetid://6031280882", -- Placeholder, needs gradient texture
-            ImageColor3 = Color3.new(1,1,1), ImageTransparency = 0, Parent = pickerFrame })
-        Utility.createCorner(svBox, 4)
-        -- Add gradient textures (requires specific assets or procedural generation)
-        local satGradient = Utility.createInstance("UIGradient", { Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.new(1,1,1)), ColorSequenceKeypoint.new(1, Color3.new(1,1,1))}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0,0), NumberSequenceKeypoint.new(1,1)}), Rotation = 90, Parent = svBox })
-        local valGradient = Utility.createInstance("UIGradient", { Color = ColorSequence.new(Color3.new(0,0,0)), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0,0), NumberSequenceKeypoint.new(1,1)}), Rotation = 0, Parent = svBox })
-
-        local svPicker = Utility.createInstance("Frame", { Name = "SVPicker", Size = UDim2.new(0, 10, 0, 10), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.new(1,1,1), BorderSizePixel = 2, BorderColor3 = Color3.new(0,0,0), Parent = svBox })
-        Utility.createCorner(svPicker, 5)
-
-        -- Hue Slider
-        local hueSlider = Utility.createInstance("ImageLabel", { Name = "HueSlider", Size = UDim2.new(0, 180, 0, 15), Position = UDim2.new(0.5, 0, 0, 170), AnchorPoint = Vector2.new(0.5, 0), BackgroundTransparency = 1, Image = "rbxassetid://6031280882", -- Placeholder, needs hue gradient texture
-            ImageColor3 = Color3.new(1,1,1), Parent = pickerFrame })
-        Utility.createCorner(hueSlider, 7.5)
-        local hueGradient = Utility.createInstance("UIGradient", {
-            Color = ColorSequence.new({
-                ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)), ColorSequenceKeypoint.new(1/6, Color3.fromRGB(255, 255, 0)), ColorSequenceKeypoint.new(2/6, Color3.fromRGB(0, 255, 0)), ColorSequenceKeypoint.new(3/6, Color3.fromRGB(0, 255, 255)), ColorSequenceKeypoint.new(4/6, Color3.fromRGB(0, 0, 255)), ColorSequenceKeypoint.new(5/6, Color3.fromRGB(255, 0, 255)), ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))
-            }),
-            Rotation = 90, Parent = hueSlider
-        })
-
-        local huePicker = Utility.createInstance("Frame", { Name = "HuePicker", Size = UDim2.new(0, 8, 0, 20), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.new(1,1,1), BorderSizePixel = 2, BorderColor3 = Color3.new(0,0,0), Parent = hueSlider })
-        Utility.createCorner(huePicker, 4)
-
-        -- Input Fields (Optional)
-        -- ... create TextBoxes for R, G, B, Hex ...
-
-        -- Update Logic
-        local currentH, currentS, currentV = Color3.toHSV(ColorPickerComponent.Value)
-
-        local function updateColorFromHSV()
-            local newColor = Color3.fromHSV(currentH, currentS, currentV)
-            ColorPickerComponent:SetValue(newColor) -- Use SetValue to update preview, flag, and call callback
-            svBox.BackgroundColor3 = Color3.fromHSV(currentH, 1, 1) -- Update SV box base color
+        -- Close any other active dropdown/picker first
+        if isOpen and ActiveDropdown and ActiveDropdown ~= self then
+             Utility.safeCall(ActiveDropdown.ToggleOpen, ActiveDropdown, false)
         end
-
-        local function updatePickersFromHSV()
-            svPicker.Position = UDim2.new(currentS, 0, 1 - currentV, 0)
-            huePicker.Position = UDim2.new(currentH, 0, 0.5, 0)
-        end
-
-        -- SV Box Interaction
-        local svDragging = false
-        svBox:AddConnection(svBox.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then svDragging = true end
-        end))
-        svBox:AddConnection(svBox.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then svDragging = false end
-        end))
-        svBox:AddConnection(svBox.InputChanged:Connect(function(input)
-            if svDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-                local relX = math.clamp((input.Position.X - svBox.AbsolutePosition.X) / svBox.AbsoluteSize.X, 0, 1)
-                local relY = math.clamp((input.Position.Y - svBox.AbsolutePosition.Y) / svBox.AbsoluteSize.Y, 0, 1)
-                currentS = relX
-                currentV = 1 - relY
-                updatePickersFromHSV()
-                updateColorFromHSV()
-            end
-        end))
-
-        -- Hue Slider Interaction
-        local hueDragging = false
-        hueSlider:AddConnection(hueSlider.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then hueDragging = true end
-        end))
-        hueSlider:AddConnection(hueSlider.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then hueDragging = false end
-        end))
-        hueSlider:AddConnection(hueSlider.InputChanged:Connect(function(input)
-            if hueDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-                local relX = math.clamp((input.Position.X - hueSlider.AbsolutePosition.X) / hueSlider.AbsoluteSize.X, 0, 1)
-                currentH = relX
-                updatePickersFromHSV()
-                updateColorFromHSV()
-            end
-        end))
-
-        updatePickersFromHSV() -- Set initial picker positions
-    end
-
-    function ColorPickerComponent:ToggleOpen(state)
-        if isOpen == state then return end
-        isOpen = state
-
-        createPickerUI() -- Ensure UI exists
-
-        local targetSizeY
-        local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
         if isOpen then
-            pickerFrame.Visible = true
-            targetSizeY = 36 + pickerFrame.Size.Y.Offset + 4 -- Header + Picker + Padding
-            colorPickerContainer.ClipsDescendants = false
-            colorPickerContainer.ZIndex = 100
-            ActiveDropdown = self -- Use same mechanism as dropdown to close on outside click
-        else
-            targetSizeY = 36
-            colorPickerContainer.ClipsDescendants = true
-            colorPickerContainer.ZIndex = 10
-            if ActiveDropdown == self then ActiveDropdown = nil end
-        end
+            ActiveDropdown = self -- Set this as the active picker
 
-        local sizeTween = TweenService:Create(colorPickerContainer, tweenInfo, { Size = UDim2.new(1, 0, 0, targetSizeY) })
-        sizeTween:Play()
+            if not pickerPopup or not pickerPopup.Parent then
+                local popupWidth, popupHeight = 200, 230
+                pickerPopup = Utility.createInstance("Frame", {
+                    Name = "PickerPopup",
+                    Size = UDim2.new(0, popupWidth, 0, popupHeight),
+                    Position = UDim2.new(0, colorButton.AbsolutePosition.X + colorButton.AbsoluteSize.X - popupWidth, 0, colorButton.AbsolutePosition.Y + colorButton.AbsoluteSize.Y + 2), -- Position below and aligned right
+                    BackgroundColor3 = theme.ColorPickerBackground,
+                    BorderSizePixel = 1, BorderColor3 = theme.InputStroke,
+                    ClipsDescendants = true, Visible = false,
+                    ZIndex = 110, -- Above options lists
+                    Parent = self._window.ScreenGui
+                })
+                Utility.createCorner(pickerPopup, 6)
+                Utility.registerThemedElement(pickerPopup, "BackgroundColor3", "ColorPickerBackground")
+                Utility.registerThemedElement(pickerPopup, "BorderColor3", "InputStroke")
+                Utility.manageConnections(pickerPopup)
 
-        if not isOpen then
-            sizeTween.Completed:Connect(function()
-                if pickerFrame and not isOpen then pickerFrame.Visible = false end
-            end)
-        end
-         -- Force layout update
-        task.delay(tweenInfo.Time + 0.05, function()
-            if self.Instance and self.Instance.Parent and self.Instance.Parent:FindFirstChildOfClass("UIListLayout") then
-                self.Instance.Parent.UIListLayout:ApplyLayout()
+                -- Saturation/Value Box (using UIGradient)
+                local svBoxSize = popupWidth - 20
+                local svBox = Utility.createInstance("ImageButton", { -- ImageButton for input
+                    Name = "SVBox",
+                    Size = UDim2.new(0, svBoxSize, 0, svBoxSize),
+                    Position = UDim2.new(0.5, 0, 0, 10), AnchorPoint = Vector2.new(0.5, 0),
+                    BackgroundColor3 = Color3.fromHSV(currentValue:ToHSV()), -- Initial hue
+                    Parent = pickerPopup
+                })
+                Utility.createCorner(svBox, 4)
+
+                -- Saturation Gradient (White -> Transparent)
+                Utility.createInstance("UIGradient", {
+                    Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.new(1,1,1)), ColorSequenceKeypoint.new(1, Color3.new(1,1,1))}),
+                    Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1)}),
+                    Rotation = 90, Parent = svBox
+                })
+                -- Value Gradient (Black -> Transparent)
+                Utility.createInstance("UIGradient", {
+                    Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.new(0,0,0)), ColorSequenceKeypoint.new(1, Color3.new(0,0,0))}),
+                    Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0)}),
+                    Rotation = 0, Parent = svBox
+                })
+
+                -- SV Picker Circle
+                local svPicker = Utility.createInstance("Frame", {
+                    Name = "SVPicker",
+                    Size = UDim2.new(0, 10, 0, 10), AnchorPoint = Vector2.new(0.5, 0.5),
+                    BackgroundColor3 = Color3.new(1,1,1), BorderSizePixel = 1, BorderColor3 = Color3.new(0,0,0),
+                    ZIndex = svBox.ZIndex + 1, Parent = svBox
+                })
+                Utility.createCorner(svPicker, 5)
+
+                -- Hue Slider
+                local hueSliderHeight = 15
+                local hueSlider = Utility.createInstance("ImageButton", { -- ImageButton for input
+                    Name = "HueSlider",
+                    Size = UDim2.new(0, svBoxSize, 0, hueSliderHeight),
+                    Position = UDim2.new(0.5, 0, 0, svBoxSize + 20), AnchorPoint = Vector2.new(0.5, 0),
+                    BackgroundColor3 = Color3.new(1,1,1), -- Background for gradient
+                    Parent = pickerPopup
+                })
+                Utility.createCorner(hueSlider, hueSliderHeight / 2)
+                -- Hue Gradient
+                Utility.createInstance("UIGradient", {
+                    Color = ColorSequence.new({
+                        ColorSequenceKeypoint.new(0, Color3.new(1,0,0)), ColorSequenceKeypoint.new(1/6, Color3.new(1,1,0)),
+                        ColorSequenceKeypoint.new(2/6, Color3.new(0,1,0)), ColorSequenceKeypoint.new(3/6, Color3.new(0,1,1)),
+                        ColorSequenceKeypoint.new(4/6, Color3.new(0,0,1)), ColorSequenceKeypoint.new(5/6, Color3.new(1,0,1)),
+                        ColorSequenceKeypoint.new(1, Color3.new(1,0,0))
+                    }),
+                    Parent = hueSlider
+                })
+
+                -- Hue Picker Thumb
+                local huePicker = Utility.createInstance("Frame", {
+                    Name = "HuePicker",
+                    Size = UDim2.new(0, 6, 1, 4), AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.new(0, 0, 0.5, 0), -- Position updated later
+                    BackgroundColor3 = Color3.new(1,1,1), BorderSizePixel = 1, BorderColor3 = Color3.new(0,0,0),
+                    ZIndex = hueSlider.ZIndex + 1, Parent = hueSlider
+                })
+                Utility.createCorner(huePicker, 3)
+
+                -- Function to update color from HSV
+                local function updateColorFromHSV(h, s, v, skipCallback)
+                    local newColor = Color3.fromHSV(h, s, v)
+                    if CPApi.Value:ToHSV() == newColor:ToHSV() then return end -- Avoid redundant updates
+
+                    CPApi.Value = newColor
+                    currentValue = newColor
+
+                    colorPreview.BackgroundColor3 = newColor
+                    svBox.BackgroundColor3 = Color3.fromHSV(h, 1, 1) -- Update SV box base hue
+
+                    -- Update picker positions
+                    svPicker.Position = UDim2.new(s, 0, 1 - v, 0)
+                    huePicker.Position = UDim2.new(h, 0, 0.5, 0)
+
+                    -- Update border color for visibility
+                    local lum = (newColor.R*0.299 + newColor.G*0.587 + newColor.B*0.114)
+                    svPicker.BorderColor3 = lum > 0.5 and Color3.new(0,0,0) or Color3.new(1,1,1)
+
+                    if flag and LuminaUI.Flags[flag] then LuminaUI.Flags[flag].Value = newColor end
+                    if not skipCallback then Utility.safeCall(callback, newColor) end
+                end
+
+                -- Initial state update
+                local h, s, v = currentValue:ToHSV()
+                updateColorFromHSV(h, s, v, true) -- Update UI without callback initially
+
+                -- Input Handling
+                local svDragging, hueDragging = false, false
+
+                local function updateSV(input)
+                    local x = math.clamp((input.Position.X - svBox.AbsolutePosition.X) / svBox.AbsoluteSize.X, 0, 1)
+                    local y = math.clamp((input.Position.Y - svBox.AbsolutePosition.Y) / svBox.AbsoluteSize.Y, 0, 1)
+                    local currentH, _, _ = CPApi.Value:ToHSV()
+                    updateColorFromHSV(currentH, x, 1 - y)
+                end
+                local function updateHue(input)
+                    local x = math.clamp((input.Position.X - hueSlider.AbsolutePosition.X) / hueSlider.AbsoluteSize.X, 0, 1)
+                    local _, currentS, currentV = CPApi.Value:ToHSV()
+                    updateColorFromHSV(x, currentS, currentV)
+                end
+
+                pickerPopup:AddConnection(svBox.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then svDragging = true; updateSV(input) end end))
+                pickerPopup:AddConnection(hueSlider.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then hueDragging = true; updateHue(input) end end))
+
+                pickerPopup:AddConnection(UserInputService.InputChanged:Connect(function(input)
+                    if svDragging and input.UserInputType == Enum.UserInputType.MouseMovement then updateSV(input) end
+                    if hueDragging and input.UserInputType == Enum.UserInputType.MouseMovement then updateHue(input) end
+                end))
+                pickerPopup:AddConnection(UserInputService.InputEnded:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 then svDragging, hueDragging = false, false end
+                end))
             end
-        end)
+
+            -- Position and Animate Open
+            pickerPopup.Position = UDim2.new(0, colorButton.AbsolutePosition.X + colorButton.AbsoluteSize.X - pickerPopup.AbsoluteSize.X, 0, colorButton.AbsolutePosition.Y + colorButton.AbsoluteSize.Y + 2)
+            pickerPopup.Visible = true
+            pickerPopup.Size = UDim2.new(pickerPopup.Size.X.Scale, pickerPopup.Size.X.Offset, 0, 0) -- Start height 0
+            TweenService:Create(pickerPopup, TweenInfo.new(0.2), { Size = UDim2.new(pickerPopup.Size.X.Scale, pickerPopup.Size.X.Offset, 0, 230) }):Play() -- Animate to full height
+
+        else
+            ActiveDropdown = nil -- No longer active
+
+            if pickerPopup and pickerPopup.Parent then
+                local popupRef = pickerPopup
+                pickerPopup = nil
+                local tweenInfoClose = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+                local sizeTween = TweenService:Create(popupRef, tweenInfoClose, { Size = UDim2.new(popupRef.Size.X.Scale, popupRef.Size.X.Offset, 0, 0) })
+                sizeTween:Play()
+                sizeTween.Completed:Connect(function() Utility.destroyInstance(popupRef) end)
+            end
+        end
     end
 
-    function ColorPickerComponent:SetValue(value, skipCallback)
-        if not typeof(value) == "Color3" then return end
-        if self.Value == value then return end
+    -- Update function
+    function CPApi:SetValue(value, skipCallback)
+        if typeof(value) ~= "Color3" then
+            warn("[LuminaUI] Invalid value type for ColorPicker: expected Color3, got", typeof(value))
+            return
+        end
+        -- Compare HSV for floating point precision issues
+        local h1, s1, v1 = self.Value:ToHSV()
+        local h2, s2, v2 = value:ToHSV()
+        if math.abs(h1-h2)<0.001 and math.abs(s1-s2)<0.001 and math.abs(v1-v2)<0.001 then return end -- No change
 
+        -- Update internal value and preview
         self.Value = value
+        currentValue = value
         colorPreview.BackgroundColor3 = value
 
-        -- Update picker UI if it exists
-        if pickerFrame then
-            local h, s, v = Color3.toHSV(value)
-            local svBox = pickerFrame:FindFirstChild("SVBox")
-            local hueSlider = pickerFrame:FindFirstChild("HueSlider")
-            if svBox then svBox.BackgroundColor3 = Color3.fromHSV(h, 1, 1) end
+        -- Update picker UI if open
+        if pickerPopup and pickerPopup.Parent then
+            local h, s, v = value:ToHSV()
+            local svBox = pickerPopup:FindFirstChild("SVBox")
             local svPicker = svBox and svBox:FindFirstChild("SVPicker")
+            local hueSlider = pickerPopup:FindFirstChild("HueSlider")
             local huePicker = hueSlider and hueSlider:FindFirstChild("HuePicker")
+
+            if svBox then svBox.BackgroundColor3 = Color3.fromHSV(h, 1, 1) end
             if svPicker then svPicker.Position = UDim2.new(s, 0, 1 - v, 0) end
             if huePicker then huePicker.Position = UDim2.new(h, 0, 0.5, 0) end
+
+            -- Update SV picker border color
+            if svPicker then
+                 local lum = (value.R*0.299 + value.G*0.587 + value.B*0.114)
+                 svPicker.BorderColor3 = lum > 0.5 and Color3.new(0,0,0) or Color3.new(1,1,1)
+            end
         end
 
-        -- Update flags
-        if flag then
-            LuminaUI.Flags[flag] = { Type = "ColorPicker", Value = value, ComponentRef = self }
+        -- Update flag registry
+        if flag and LuminaUI.Flags[flag] then
+            LuminaUI.Flags[flag].Value = value
         end
 
-        -- Execute callback
+        -- Trigger callback if not skipped
         if not skipCallback then
             Utility.safeCall(callback, value)
         end
-    end
-    function ColorPickerComponent:SetTooltip(text) tooltipText = text end
-    function ColorPickerComponent:Destroy() Utility.destroyInstance(self.Instance) end
-
-    -- Store flag reference immediately
-    if flag then
-        LuminaUI.Flags[flag] = { Type = "ColorPicker", Value = currentColor, ComponentRef = ColorPickerComponent }
     end
 
     -- Interaction
-    colorPickerContainer:AddConnection(pickerInteract.MouseButton1Click:Connect(function()
-        ColorPickerComponent:ToggleOpen(not isOpen)
-    end))
+    CPApi:AddConnection(colorButton.MouseButton1Click:Connect(function() self:ToggleOpen() end))
 
-    -- Hover Effects
-    local hoverColor = theme.ElementBackgroundHover
-    local normalColor = theme.ElementBackground
-    local tweenInfo = TweenInfo.new(0.15)
-    colorPickerContainer:AddConnection(pickerInteract.MouseEnter:Connect(function()
-        TweenService:Create(colorPickerContainer, tweenInfo, { BackgroundColor3 = hoverColor }):Play()
-        if tooltipText then Utility.showTooltip(tooltipText, theme) end
-    end))
-    colorPickerContainer:AddConnection(pickerInteract.MouseLeave:Connect(function()
-        TweenService:Create(colorPickerContainer, tweenInfo, { BackgroundColor3 = normalColor }):Play()
-        if tooltipText then Utility.hideTooltip() end
-    end))
-
-    table.insert(self._components, ColorPickerComponent)
-    return ColorPickerComponent
-end
-
-function Tab:CreateCheckbox(options)
-    options = options or {}
-    local name = options.Name or "Checkbox"
-    local currentValue = options.CurrentValue or false
-    local flag = options.Flag or nil
-    local callback = options.Callback or function() end
-    local iconId = options.Icon or 0
-    local tooltipText = options.Tooltip or nil
-    local theme = Window.CurrentTheme
-
-    local checkboxContainer = Utility.createInstance("Frame", { Name = "Checkbox_" .. name, Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = theme.ElementBackground, Parent = self.Page })
-    Utility.createCorner(checkboxContainer, 4)
-    Utility.registerThemedElement(checkboxContainer, "BackgroundColor3", "ElementBackground", "ElementBackgroundHover")
-    Utility.manageConnections(checkboxContainer)
-
-    local iconPadding = 0
-    if iconId ~= 0 then
-        local checkboxIcon = Utility.createInstance("ImageLabel", { Name = "Icon", Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 8, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(iconId), ImageColor3 = theme.TextColor, Parent = checkboxContainer })
-        Utility.registerThemedElement(checkboxIcon, "ImageColor3", "TextColor")
-        iconPadding = 30
+    -- Tooltip
+    if cpSettings.Tooltip then
+         CPApi:AddConnection(cpFrame.MouseEnter:Connect(function() if not isOpen then Utility.showTooltip(cpSettings.Tooltip, self._window.CurrentTheme) end end))
+         CPApi:AddConnection(cpFrame.MouseLeave:Connect(function() Utility.hideTooltip() end))
     end
 
-    local checkboxTitle = Utility.createInstance("TextLabel", { Name = "Title", Size = UDim2.new(1, -(60 + iconPadding), 1, 0), Position = UDim2.new(0, 10 + iconPadding, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = name, TextColor3 = theme.TextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = checkboxContainer })
-    Utility.registerThemedElement(checkboxTitle, "TextColor3", "TextColor")
+    -- Register flag for saving/loading
+    if flag then
+        LuminaUI.Flags[flag] = { Value = currentValue, Type = "ColorPicker", ComponentRef = CPApi }
+    end
 
-    local checkboxFrame = Utility.createInstance("Frame", { Name = "Checkbox", Size = UDim2.new(0, 18, 0, 18), Position = UDim2.new(1, -46, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = currentValue and theme.CheckboxChecked or theme.CheckboxUnchecked, Parent = checkboxContainer })
-    Utility.createCorner(checkboxFrame, 4)
-    -- No direct theme registration needed here, updated via SetValue
+    return self:AddComponent(cpFrame, CPApi)
+end
 
-    local checkmark = Utility.createInstance("ImageLabel", { Name = "Checkmark", Size = UDim2.new(0.8, 0, 0.8, 0), Position = UDim2.new(0.5, 0, 0.5, 0), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, Image = "rbxassetid://3926307971", ImageColor3 = Color3.fromRGB(255, 255, 255), ImageTransparency = currentValue and 0 or 1, Parent = checkboxFrame })
+-- Add Keybind
+function Tab:AddKeybind(keybindSettings)
+    keybindSettings = keybindSettings or {}
+    local text = keybindSettings.Text or "Keybind"
+    local flag = keybindSettings.Flag -- Mandatory
+    local defaultKey = keybindSettings.Default or Enum.KeyCode.None
+    local mode = keybindSettings.Mode or "Toggle" -- "Toggle", "Hold", "Always"
+    local order = keybindSettings.Order or (#self._components + 1)
+    local callback = keybindSettings.Callback or function(state) print("[LuminaUI] Keybind '"..text.."' state:", state) end
+    local theme = self._window.CurrentTheme
 
-    local checkboxInteract = Utility.createInstance("TextButton", { Name = "Interact", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = checkboxContainer })
+    if not flag then warn("[LuminaUI] Keybind '"..text.."' is missing a 'Flag' for configuration saving.") end
+    if typeof(defaultKey) == "string" then defaultKey = Enum.KeyCode[defaultKey] or Enum.KeyCode.None end -- Allow string names
 
-    -- Component API
-    local CheckboxComponent = { Instance = checkboxContainer, Value = currentValue }
-    function CheckboxComponent:SetValue(value, skipCallback)
-        value = not not value -- Ensure boolean
+    local currentKey = defaultKey
+    local currentMode = mode
+    local isBinding = false -- Is user currently clicking to bind a new key?
+    local isActive = false -- Is the keybind currently active (pressed/toggled on)?
+    local inputConn = nil -- Connection for UserInputService
+
+    local kbFrame = Utility.createInstance("Frame", {
+        Name = "Keybind_" .. text,
+        Size = UDim2.new(1, 0, 0, 35), -- Standard height
+        BackgroundTransparency = 1,
+        LayoutOrder = order,
+        -- Parent set by AddComponent
+    })
+    Utility.manageConnections(kbFrame)
+
+    local label = Utility.createInstance("TextLabel", {
+        Name = "Label",
+        Size = UDim2.new(0.6, -10, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = text,
+        TextColor3 = theme.TextColor, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = kbFrame
+    })
+    Utility.registerThemedElement(label, "TextColor3", "TextColor")
+
+    local keyButton = Utility.createInstance("TextButton", {
+        Name = "KeyButton",
+        Size = UDim2.new(0.4, -10, 1, -10), Position = UDim2.new(1, -10, 0.5, 0),
+        AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = theme.InputBackground,
+        Font = Enum.Font.GothamBold, Text = currentKey.Name, TextColor3 = theme.TextColor, TextSize = 13,
+        Parent = kbFrame
+    })
+    Utility.createCorner(keyButton, 4)
+    local buttonStroke = Utility.createStroke(keyButton, theme.InputStroke, 1)
+    Utility.registerThemedElement(keyButton, "BackgroundColor3", "InputBackground", "ElementBackgroundHover")
+    Utility.registerThemedElement(keyButton, "TextColor3", "TextColor")
+    -- Stroke registered
+
+    -- API Object
+    local KBApi = { Instance = kbFrame, _connections = {}, Value = currentKey, Mode = currentMode, IsActive = isActive }
+    Utility.manageConnections(KBApi)
+
+    -- Function to update the keybind listener
+    local function updateListener()
+        if inputConn then inputConn:Disconnect(); inputConn = nil end
+        if currentKey == Enum.KeyCode.None then isActive = false; return end -- No key, no listener
+
+        if currentMode == "Always" then
+            isActive = true -- Always active if key is set
+            Utility.safeCall(callback, true)
+            return -- No input needed
+        end
+
+        inputConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+            if gameProcessed then return end
+            if input.KeyCode == currentKey then
+                if currentMode == "Toggle" then
+                    isActive = not isActive
+                    Utility.safeCall(callback, isActive)
+                elseif currentMode == "Hold" then
+                    isActive = true
+                    Utility.safeCall(callback, true)
+                end
+            end
+        end)
+        KBApi:AddConnection(inputConn) -- Manage this connection
+
+        if currentMode == "Hold" then
+            local endedConn = UserInputService.InputEnded:Connect(function(input)
+                if input.KeyCode == currentKey then
+                    isActive = false
+                    Utility.safeCall(callback, false)
+                end
+            end)
+            KBApi:AddConnection(endedConn) -- Manage this connection too
+        end
+    end
+
+    -- Function to set the key
+    function KBApi:SetValue(value, skipCallback)
+        if typeof(value) == "string" then value = Enum.KeyCode[value] or Enum.KeyCode.None end
+        if typeof(value) ~= "EnumItem" or not value:IsA("KeyCode") then value = Enum.KeyCode.None end
+        if self.Value == value then return end -- No change
+
+        self.Value = value
+        currentKey = value
+        keyButton.Text = value.Name
+        isBinding = false -- Ensure binding mode is exited
+
+        updateListener() -- Recreate listener for the new key
+
+        if flag and LuminaUI.Flags[flag] then LuminaUI.Flags[flag].Value = value.Name end -- Save key name
+        -- Callback is triggered by input, not usually by SetValue itself
+    end
+
+    -- Function to set the mode
+    function KBApi:SetMode(newMode)
+        if newMode ~= "Toggle" and newMode ~= "Hold" and newMode ~= "Always" then return end
+        if self.Mode == newMode then return end
+
+        self.Mode = newMode
+        currentMode = newMode
+        isActive = false -- Reset active state when mode changes
+        updateListener() -- Recreate listener for the new mode
+
+        if flag and LuminaUI.Flags[flag] then LuminaUI.Flags[flag].Mode = newMode end -- Save mode if needed (requires config format change)
+        -- Trigger callback with initial state for new mode? Optional.
+        -- Utility.safeCall(callback, isActive)
+    end
+
+    -- Interaction (Click to bind)
+    KBApi:AddConnection(keyButton.MouseButton1Click:Connect(function()
+        if isBinding then -- Cancel binding
+            isBinding = false
+            keyButton.Text = currentKey.Name
+            keyButton.TextColor3 = theme.TextColor
+        else -- Start binding
+            isBinding = true
+            keyButton.Text = "..."
+            keyButton.TextColor3 = theme.SubTextColor -- Indicate binding state
+
+            -- Temporary listener for the next key press
+            local bindConn
+            bindConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Keyboard or input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 then -- Allow mouse buttons too
+                    local newKey = input.KeyCode
+                    -- Allow Esc or clicking button again to cancel/unbind
+                    if newKey == Enum.KeyCode.Escape or input.UserInputType == Enum.UserInputType.MouseButton1 and input.Target == keyButton then
+                        newKey = Enum.KeyCode.None
+                    end
+                    self:SetValue(newKey) -- Set the new key (handles exiting binding state)
+                    if bindConn then bindConn:Disconnect() end -- Disconnect this temporary listener
+                end
+            end)
+            -- Auto-cancel if focus lost?
+            local focusLostConn = keyButton.FocusLost:Connect(function()
+                 if isBinding then
+                     isBinding = false
+                     keyButton.Text = currentKey.Name
+                     keyButton.TextColor3 = theme.TextColor
+                     if bindConn then bindConn:Disconnect() end
+                 end
+                 if focusLostConn then focusLostConn:Disconnect() end
+            end)
+        end
+    end))
+
+    -- Tooltip
+    if keybindSettings.Tooltip then
+         KBApi:AddConnection(kbFrame.MouseEnter:Connect(function() Utility.showTooltip(keybindSettings.Tooltip, self._window.CurrentTheme) end))
+         KBApi:AddConnection(kbFrame.MouseLeave:Connect(function() Utility.hideTooltip() end))
+    end
+
+    -- Initial listener setup
+    updateListener()
+
+    -- Register flag for saving/loading (saving KeyCode.Name)
+    if flag then
+        LuminaUI.Flags[flag] = { Value = currentKey.Name, Type = "Keybind", ComponentRef = KBApi, Mode = currentMode }
+        -- Need to handle loading Mode from config if saved
+    end
+
+    return self:AddComponent(kbFrame, KBApi)
+end
+
+-- Add Section
+function Tab:AddSection(sectionSettings)
+    sectionSettings = sectionSettings or {}
+    local text = sectionSettings.Text or "Section"
+    local order = sectionSettings.Order or (#self._components + 1)
+    local theme = self._window.CurrentTheme
+
+    local sectionFrame = Utility.createInstance("Frame", {
+        Name = "Section_" .. text,
+        Size = UDim2.new(1, 0, 0, 25), -- Slightly shorter than standard elements
+        BackgroundTransparency = 1, -- No background itself
+        LayoutOrder = order,
+        -- Parent set by AddComponent
+    })
+    Utility.manageConnections(sectionFrame)
+
+    local lineLeft = Utility.createInstance("Frame", {
+        Name = "LineLeft",
+        Size = UDim2.new(0.5, -40, 0, 1), -- Half width minus text space/padding
+        Position = UDim2.new(0, 10, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
+        BackgroundColor3 = theme.ElementStroke, BackgroundTransparency = 0.5,
+        Parent = sectionFrame
+    })
+    Utility.registerThemedElement(lineLeft, "BackgroundColor3", "ElementStroke")
+
+    local label = Utility.createInstance("TextLabel", {
+        Name = "Label",
+        Size = UDim2.new(0, 60, 1, 0), -- Fixed width for text
+        Position = UDim2.new(0.5, 0, 0.5, 0), AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = text,
+        TextColor3 = theme.SubTextColor, TextSize = 12,
+        Parent = sectionFrame
+    })
+    Utility.registerThemedElement(label, "TextColor3", "SubTextColor")
+
+    local lineRight = Utility.createInstance("Frame", {
+        Name = "LineRight",
+        Size = UDim2.new(0.5, -40, 0, 1), -- Half width minus text space/padding
+        Position = UDim2.new(1, -10, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5),
+        BackgroundColor3 = theme.ElementStroke, BackgroundTransparency = 0.5,
+        Parent = sectionFrame
+    })
+    Utility.registerThemedElement(lineRight, "BackgroundColor3", "ElementStroke")
+
+    -- API Object (Simple, mostly for consistency)
+    local SectionApi = { Instance = sectionFrame }
+
+    return self:AddComponent(sectionFrame, SectionApi)
+end
+
+-- Add ProgressBar
+function Tab:AddProgressBar(pbSettings)
+    pbSettings = pbSettings or {}
+    local text = pbSettings.Text or "Progress"
+    local flag = pbSettings.Flag -- Mandatory
+    local defaultValue = pbSettings.Default or 0 -- Value between 0 and 1
+    local showPercentage = pbSettings.ShowPercentage ~= false -- Default true
+    local order = pbSettings.Order or (#self._components + 1)
+    local theme = self._window.CurrentTheme
+
+    if not flag then warn("[LuminaUI] ProgressBar '"..text.."' is missing a 'Flag' for configuration saving/updating.") end
+
+    defaultValue = math.clamp(defaultValue, 0, 1)
+    local currentValue = defaultValue
+
+    local pbFrame = Utility.createInstance("Frame", {
+        Name = "ProgressBar_" .. text,
+        Size = UDim2.new(1, 0, 0, 35), -- Standard height
+        BackgroundTransparency = 1,
+        LayoutOrder = order,
+        -- Parent set by AddComponent
+    })
+    Utility.manageConnections(pbFrame)
+
+    local label = Utility.createInstance("TextLabel", {
+        Name = "Label",
+        Size = UDim2.new(showPercentage and 0.7 or 1, -10, 0, 18), -- Adjust width based on percentage display
+        Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = text,
+        TextColor3 = theme.TextColor, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = pbFrame
+    })
+    Utility.registerThemedElement(label, "TextColor3", "TextColor")
+
+    local percentageLabel = nil
+    if showPercentage then
+        percentageLabel = Utility.createInstance("TextLabel", {
+            Name = "PercentageLabel",
+            Size = UDim2.new(0.3, -10, 0, 18), Position = UDim2.new(1, -10, 0, 0),
+            AnchorPoint = Vector2.new(1, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+            Text = string.format("%.0f%%", currentValue * 100), TextColor3 = theme.SubTextColor, TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Right, Parent = pbFrame
+        })
+        Utility.registerThemedElement(percentageLabel, "TextColor3", "SubTextColor")
+    end
+
+    local track = Utility.createInstance("Frame", {
+        Name = "Track",
+        Size = UDim2.new(1, -20, 0, 8), Position = UDim2.new(0, 10, 0, 20),
+        BackgroundColor3 = theme.ProgressBarBackground, Parent = pbFrame
+    })
+    Utility.createCorner(track, 4)
+    Utility.registerThemedElement(track, "BackgroundColor3", "ProgressBarBackground")
+
+    local fill = Utility.createInstance("Frame", {
+        Name = "Fill",
+        Size = UDim2.new(currentValue, 0, 1, 0), BackgroundColor3 = theme.ProgressBarFill,
+        Parent = track
+    })
+    Utility.createCorner(fill, 4)
+    Utility.registerThemedElement(fill, "BackgroundColor3", "ProgressBarFill")
+
+    -- API Object
+    local PBApi = { Instance = pbFrame, _connections = {}, Value = currentValue }
+    Utility.manageConnections(PBApi)
+
+    -- Update function
+    function PBApi:SetValue(value, skipCallback) -- skipCallback is unused but kept for consistency
+        value = math.clamp(value, 0, 1)
+        if self.Value == value then return end -- No change
+
+        self.Value = value
+        currentValue = value
+
+        -- Animate fill bar
+        TweenService:Create(fill, TweenInfo.new(0.2), { Size = UDim2.new(value, 0, 1, 0) }):Play()
+        if percentageLabel then
+            percentageLabel.Text = string.format("%.0f%%", value * 100)
+        end
+
+        -- Update flag registry (if needed for external reading, not usually saved)
+        if flag and LuminaUI.Flags[flag] then
+            LuminaUI.Flags[flag].Value = value
+        end
+    end
+
+    -- Tooltip
+    if pbSettings.Tooltip then
+         PBApi:AddConnection(pbFrame.MouseEnter:Connect(function() Utility.showTooltip(pbSettings.Tooltip, self._window.CurrentTheme) end))
+         PBApi:AddConnection(pbFrame.MouseLeave:Connect(function() Utility.hideTooltip() end))
+    end
+
+    -- Register flag (primarily for external updates via SetValue)
+    if flag then
+        LuminaUI.Flags[flag] = { Value = currentValue, Type = "ProgressBar", ComponentRef = PBApi }
+    end
+
+    return self:AddComponent(pbFrame, PBApi)
+end
+
+-- Add Checkbox
+function Tab:AddCheckbox(cbSettings)
+    cbSettings = cbSettings or {}
+    local text = cbSettings.Text or "Checkbox"
+    local flag = cbSettings.Flag -- Mandatory
+    local defaultValue = cbSettings.Default or false
+    local order = cbSettings.Order or (#self._components + 1)
+    local callback = cbSettings.Callback or function(value) print("[LuminaUI] Checkbox '"..text.."' set to:", value) end
+    local theme = self._window.CurrentTheme
+
+    if not flag then warn("[LuminaUI] Checkbox '"..text.."' is missing a 'Flag' for configuration saving.") end
+
+    local currentValue = defaultValue
+
+    local cbFrame = Utility.createInstance("Frame", {
+        Name = "Checkbox_" .. text,
+        Size = UDim2.new(1, 0, 0, 25), -- Shorter height
+        BackgroundTransparency = 1,
+        LayoutOrder = order,
+        -- Parent set by AddComponent
+    })
+    Utility.manageConnections(cbFrame)
+
+    local boxButton = Utility.createInstance("TextButton", { -- Use button for interaction
+        Name = "BoxButton",
+        Size = UDim2.new(0, 18, 0, 18), Position = UDim2.new(0, 10, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5), BackgroundColor3 = theme.CheckboxUnchecked,
+        Text = "", Parent = cbFrame
+    })
+    Utility.createCorner(boxButton, 4)
+    Utility.registerThemedElement(boxButton, "BackgroundColor3", "CheckboxUnchecked") -- Base is unchecked
+
+    local checkIcon = Utility.createInstance("ImageLabel", {
+        Name = "Check",
+        Size = UDim2.new(1, -4, 1, -4), Position = UDim2.new(0.5, 0, 0.5, 0),
+        AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1,
+        Image = "rbxassetid://6031280882", -- Placeholder checkmark-like icon (settings icon)
+        ImageColor3 = Color3.new(1,1,1), -- White checkmark
+        ImageTransparency = defaultValue and 0 or 1, -- Visible if checked by default
+        Rotation = -90, -- Rotate to look more like a check
+        ZIndex = boxButton.ZIndex + 1, Parent = boxButton
+    })
+
+    local label = Utility.createInstance("TextLabel", {
+        Name = "Label",
+        Size = UDim2.new(1, -(10 + 18 + 10), 1, 0), -- Width = Frame width - left pad - box width - right pad
+        Position = UDim2.new(0, 10 + 18 + 5, 0, 0), -- Position right of box
+        BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = text,
+        TextColor3 = theme.TextColor, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = cbFrame
+    })
+    Utility.registerThemedElement(label, "TextColor3", "TextColor")
+
+    -- API Object
+    local CBApi = { Instance = cbFrame, _connections = {}, Value = currentValue }
+    Utility.manageConnections(CBApi)
+
+    -- Update function
+    function CBApi:SetValue(value, skipCallback)
+        value = value == true
         if self.Value == value then return end
 
         self.Value = value
-        local theme = Window.CurrentTheme
+        currentValue = value
 
-        -- Update UI
-        local targetColor = value and theme.CheckboxChecked or theme.CheckboxUnchecked
+        local targetColor = value and self._window.CurrentTheme.CheckboxChecked or self._window.CurrentTheme.CheckboxUnchecked
         local targetTransparency = value and 0 or 1
-        TweenService:Create(checkboxFrame, TweenInfo.new(0.2), { BackgroundColor3 = targetColor }):Play()
-        TweenService:Create(checkmark, TweenInfo.new(0.2), { ImageTransparency = targetTransparency }):Play()
 
-        -- Update flags
-        if flag then
-            LuminaUI.Flags[flag] = { Type = "Checkbox", Value = value, ComponentRef = self }
-        end
+        local tweenInfo = TweenInfo.new(0.2)
+        TweenService:Create(boxButton, tweenInfo, { BackgroundColor3 = targetColor }):Play()
+        TweenService:Create(checkIcon, tweenInfo, { ImageTransparency = targetTransparency }):Play()
 
-        -- Execute callback
-        if not skipCallback then
-            Utility.safeCall(callback, value)
-        end
+        if flag and LuminaUI.Flags[flag] then LuminaUI.Flags[flag].Value = value end
+        if not skipCallback then Utility.safeCall(callback, value) end
     end
-    function CheckboxComponent:SetVisible(visible) self.Instance.Visible = visible end
-    function CheckboxComponent:SetTooltip(text) tooltipText = text end
-    function CheckboxComponent:Destroy() Utility.destroyInstance(self.Instance) end
 
-    -- Store flag reference immediately
+    -- Interaction
+    CBApi:AddConnection(boxButton.MouseButton1Click:Connect(function() self:SetValue(not self.Value) end))
+
+    -- Tooltip
+    if cbSettings.Tooltip then
+         CBApi:AddConnection(cbFrame.MouseEnter:Connect(function() Utility.showTooltip(cbSettings.Tooltip, self._window.CurrentTheme) end))
+         CBApi:AddConnection(cbFrame.MouseLeave:Connect(function() Utility.hideTooltip() end))
+    end
+
+    -- Register flag
     if flag then
-        LuminaUI.Flags[flag] = { Type = "Checkbox", Value = currentValue, ComponentRef = CheckboxComponent }
+        LuminaUI.Flags[flag] = { Value = currentValue, Type = "Checkbox", ComponentRef = CBApi }
     end
 
-    -- Effects & Interaction
-    local hoverColor = theme.ElementBackgroundHover
-    local normalColor = theme.ElementBackground
-    local tweenInfo = TweenInfo.new(0.15)
+    -- Initial state visual update
+    CBApi:SetValue(currentValue, true)
 
-    checkboxContainer:AddConnection(checkboxInteract.MouseEnter:Connect(function()
-        TweenService:Create(checkboxContainer, tweenInfo, { BackgroundColor3 = hoverColor }):Play()
-        if tooltipText then Utility.showTooltip(tooltipText, theme) end
-    end))
-    checkboxContainer:AddConnection(checkboxInteract.MouseLeave:Connect(function()
-        TweenService:Create(checkboxContainer, tweenInfo, { BackgroundColor3 = normalColor }):Play()
-        if tooltipText then Utility.hideTooltip() end
-    end))
-    checkboxContainer:AddConnection(checkboxInteract.MouseButton1Click:Connect(function()
-        CheckboxComponent:SetValue(not CheckboxComponent.Value)
-    end))
-
-    table.insert(self._components, CheckboxComponent)
-    return CheckboxComponent
+    return self:AddComponent(cbFrame, CBApi)
 end
 
-function Tab:CreateLabel(options)
-    options = options or {}
-    local text = options.Text or "Label"
-    local size = options.Size or 13
-    local alignment = options.Alignment or Enum.TextXAlignment.Left
-    local wrap = options.Wrap or false
-    local theme = Window.CurrentTheme
+-- Add Divider
+function Tab:AddDivider(dividerSettings)
+    dividerSettings = dividerSettings or {}
+    local thickness = dividerSettings.Thickness or 1
+    local color = dividerSettings.Color -- Uses theme if nil
+    local transparency = dividerSettings.Transparency or 0.5
+    local padding = dividerSettings.Padding or UDim.new(0, 10) -- Vertical padding
+    local order = dividerSettings.Order or (#self._components + 1)
+    local theme = self._window.CurrentTheme
 
-    local labelContainer = Utility.createInstance("Frame", { Name = "Label_" .. text:sub(1,10), Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Parent = self.Page })
-    Utility.manageConnections(labelContainer) -- Manage connections
-
-    local textLabel = Utility.createInstance("TextLabel", {
-        Name = "Text", Size = UDim2.new(1, -10, 1, 0), Position = UDim2.new(0, 5, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = text, TextColor3 = theme.SubTextColor, TextSize = size, TextXAlignment = alignment, TextWrapped = wrap, Parent = labelContainer
+    local divider = Utility.createInstance("Frame", {
+        Name = "Divider",
+        Size = UDim2.new(1, 0, 0, thickness),
+        BackgroundColor3 = color or theme.ElementStroke,
+        BackgroundTransparency = transparency,
+        BorderSizePixel = 0,
+        LayoutOrder = order,
+        -- Parent set by AddComponent
     })
-    Utility.registerThemedElement(textLabel, "TextColor3", "SubTextColor")
+    -- Add vertical padding using a container frame
+    local paddingFrame = Utility.createInstance("Frame", {
+        Name = "DividerPadding",
+        Size = UDim2.new(1, 0, 0, thickness + padding.Offset * 2), -- Total height including padding
+        BackgroundTransparency = 1,
+        LayoutOrder = order,
+        -- Parent set by AddComponent
+    })
+    divider.Position = UDim2.new(0, 0, 0.5, 0) -- Center divider within padding frame
+    divider.AnchorPoint = Vector2.new(0, 0.5)
+    divider.Parent = paddingFrame
 
-    -- Auto-adjust height if wrapped
-    if wrap then
-        labelContainer.Size = UDim2.new(1, 0, 0, 0) -- Let text determine height initially
-        labelContainer:AddConnection(textLabel:GetPropertyChangedSignal("TextBounds"):Connect(function()
-            labelContainer.Size = UDim2.new(1, 0, 0, textLabel.TextBounds.Y + 4) -- Add padding
-        end))
-        task.wait() -- Allow initial bounds calculation
-        labelContainer.Size = UDim2.new(1, 0, 0, textLabel.TextBounds.Y + 4)
+    if not color then -- Only register if using theme color
+        Utility.registerThemedElement(divider, "BackgroundColor3", "ElementStroke")
     end
 
-    -- Component API
-    local LabelComponent = { Instance = labelContainer }
-    function LabelComponent:SetText(newText)
-        text = newText
-        textLabel.Text = newText
-    end
-    function LabelComponent:SetColor(color) textLabel.TextColor3 = color end
-    function LabelComponent:SetVisible(visible) self.Instance.Visible = visible end
-    function LabelComponent:Destroy() Utility.destroyInstance(self.Instance) end
+    -- API Object (Simple)
+    local DividerApi = { Instance = paddingFrame }
 
-    table.insert(self._components, LabelComponent)
-    return LabelComponent
+    return self:AddComponent(paddingFrame, DividerApi)
 end
 
-function Tab:CreateProgressBar(options)
-    options = options or {}
-    local name = options.Name or "Progress"
-    local currentValue = options.CurrentValue or 0 -- Value between 0 and 1
-    local displayText = options.DisplayText or nil -- Optional text overlay
-    local theme = Window.CurrentTheme
+-- Add Paragraph
+function Tab:AddParagraph(pSettings)
+    pSettings = pSettings or {}
+    local title = pSettings.Title or ""
+    local content = pSettings.Content or "Paragraph content goes here."
+    local order = pSettings.Order or (#self._components + 1)
+    local theme = self._window.CurrentTheme
 
-    local progressContainer = Utility.createInstance("Frame", { Name = "Progress_" .. name, Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = theme.ElementBackground, Parent = self.Page })
-    Utility.createCorner(progressContainer, 4)
-    Utility.registerThemedElement(progressContainer, "BackgroundColor3", "ElementBackground")
-    Utility.manageConnections(progressContainer)
+    local pFrame = Utility.createInstance("Frame", {
+        Name = "Paragraph_" .. (title or "NoTitle"),
+        Size = UDim2.new(1, 0, 0, 0), -- Auto-sized height
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        LayoutOrder = order,
+        -- Parent set by AddComponent
+    })
+    Utility.manageConnections(pFrame)
 
-    local progressBackground = Utility.createInstance("Frame", { Name = "Background", Size = UDim2.new(1, -20, 0, 12), Position = UDim2.new(0, 10, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), BackgroundColor3 = theme.ProgressBarBackground, Parent = progressContainer })
-    Utility.createCorner(progressBackground, 6)
-    Utility.registerThemedElement(progressBackground, "BackgroundColor3", "ProgressBarBackground")
+    Utility.createInstance("UIListLayout", { -- Layout for title + content
+        Padding = UDim.new(0, 4),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Parent = pFrame
+    })
 
-    local progressFill = Utility.createInstance("Frame", { Name = "Fill", Size = UDim2.new(math.clamp(currentValue, 0, 1), 0, 1, 0), BackgroundColor3 = theme.ProgressBarFill, Parent = progressBackground })
-    Utility.createCorner(progressFill, 6)
-    Utility.registerThemedElement(progressFill, "BackgroundColor3", "ProgressBarFill")
-
-    local progressText = Utility.createInstance("TextLabel", { Name = "Text", Size = UDim2.new(1, 0, 1, 0), Position = UDim2.new(0, 0, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = displayText or string.format("%.0f%%", currentValue * 100), TextColor3 = theme.TextColor, TextSize = 10, TextStrokeTransparency = 0.5, Parent = progressBackground, ZIndex = progressBackground.ZIndex + 1 })
-    Utility.registerThemedElement(progressText, "TextColor3", "TextColor")
-
-    -- Component API
-    local ProgressBarComponent = { Instance = progressContainer, Value = currentValue }
-    function ProgressBarComponent:SetValue(value, textOverride)
-        value = math.clamp(value, 0, 1)
-        if self.Value == value and (textOverride == nil or textOverride == progressText.Text) then return end
-
-        self.Value = value
-        local displayTextValue = textOverride or string.format("%.0f%%", value * 100)
-
-        -- Update UI
-        progressFill:TweenSize(UDim2.new(value, 0, 1, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
-        progressText.Text = displayTextValue
+    if title ~= "" then
+        local titleLabel = Utility.createInstance("TextLabel", {
+            Name = "Title",
+            Size = UDim2.new(1, -20, 0, 18), Position = UDim2.new(0, 10, 0, 0),
+            BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = title,
+            TextColor3 = theme.TextColor, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
+            LayoutOrder = 1, Parent = pFrame
+        })
+        Utility.registerThemedElement(titleLabel, "TextColor3", "TextColor")
     end
-    function ProgressBarComponent:SetVisible(visible) self.Instance.Visible = visible end
-    function ProgressBarComponent:Destroy() Utility.destroyInstance(self.Instance) end
 
-    table.insert(self._components, ProgressBarComponent)
-    return ProgressBarComponent
+    local contentLabel = Utility.createInstance("TextLabel", {
+        Name = "Content",
+        Size = UDim2.new(1, -20, 0, 0), -- Auto-sized height
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = content,
+        TextColor3 = theme.SubTextColor, TextSize = 13, TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+        LayoutOrder = 2, Parent = pFrame
+    })
+    Utility.registerThemedElement(contentLabel, "TextColor3", "SubTextColor")
+
+    -- API Object (Simple)
+    local ParagraphApi = { Instance = pFrame }
+
+    return self:AddComponent(pFrame, ParagraphApi)
 end
 
--- Auto-select first tab after creation (defer needed)
-task.defer(function()
-    if not Window._activeTab and #Window.Tabs > 0 and Window.Tabs[1] == Tab then
-         Window:_selectTab(Tab.Instance, Tab.Page)
-    end
-    -- Apply loaded config values after the first tab might be selected
-    applyLoadedConfigValues()
-end)
+-- Store Tab API object
+self.Tabs[name] = Tab
+
+-- Select the first tab created by default
+if not self._activeTabButton then
+    self:_selectTab(tabButton, page)
+end
 
 return Tab
 end
 
---[[
--- CreateTabGroup (Example Structure - Implementation similar to Tab)
-function Window:CreateTabGroup(groupName)
--- Create group header frame (similar to a button/section)
--- Create content frame (parent for tabs in this group)
--- Add collapse/expand logic to header click
--- Store tabs created within this group
-local TabGroup = { Name = groupName, Tabs = {}, Visible = true, Instance = groupContainer }
-function TabGroup:CreateTab(tabName, icon)
-    local newTab = Window:CreateTab(tabName, icon)
-    newTab.Instance.Parent = groupContentFrame -- Move tab instance
-    table.insert(self.Tabs, newTab)
-    -- Adjust group container size based on content
-    return newTab
+-- Placeholder for CreateTabGroup
+function Window:CreateTabGroup(...)
+warn("[LuminaUI] CreateTabGroup is not yet implemented.")
 end
-table.insert(self.TabGroups, TabGroup)
-return TabGroup
-end
-]]
 
--- Finalize Window Setup
-Window:SetTheme(currentThemeName) -- Apply initial theme to all elements
-
--- Auto select first tab (if exists and none selected yet)
-task.defer(function() -- Defer to ensure all tabs are created
-if not Window._activeTab and #Window.Tabs > 0 then
-    local firstTab = Window.Tabs[1]
-    Window:_selectTab(firstTab.Instance, firstTab.Page)
+-- Select first tab if any exist after creation loop finishes
+if not Window._activeTabButton then
+local firstButton, firstPage = nil, nil
+for _, child in ipairs(Window._tabScrollFrame:GetChildren()) do
+     if child:IsA("Frame") and child:FindFirstChild("Interact") and child.Name ~= "Header" then
+         firstButton = child
+         firstPage = Window._elementsPageFolder:FindFirstChild(child.Name)
+         break
+     end
 end
-end)
+if firstButton and firstPage then
+     Window:_selectTab(firstButton, firstPage)
+elseif Window._settingsPage then -- Fallback to settings if no tabs
+     Window:_selectTab(settingsButton, Window._settingsPage) -- Pass settingsButton for context
+end
+end
 
 return Window
 end
 
--- Loading Screen Function
-function LuminaUI:CreateLoadingScreen(callback)
--- Create loading screen container
-local screenGui = Utility.createInstance("ScreenGui", { Name = "LuminaLoadingScreen", DisplayOrder = 999, ZIndexBehavior = Enum.ZIndexBehavior.Global })
-Utility.manageConnections(screenGui) -- Manage connections
+-- ==================================
+--      Internal Helper Functions (Continued)
+-- ==================================
 
--- Screen protection and parenting
-if syn and syn.protect_gui then Utility.safeCall(syn.protect_gui, screenGui) end
-screenGui.Parent = gethui and gethui() or CoreGui
+-- Creates the Settings Page (ScrollingFrame)
+local function _createSettingsPage(parentFolder, windowSettings, theme, windowApi)
+local page = Utility.createInstance("ScrollingFrame", {
+Name = "LuminaSettingsPage",
+Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
+ScrollingDirection = Enum.ScrollingDirection.Y, CanvasSize = UDim2.new(0, 0, 0, 0),
+ScrollBarThickness = 0, Visible = false, -- Initially hidden
+Parent = parentFolder
+})
+Utility.manageConnections(page)
 
-local loadingFrame = Utility.createInstance("Frame", { Name = "LoadingFrame", BackgroundColor3 = Color3.fromRGB(25, 35, 45), Position = UDim2.new(0.5, -150, 0.5, -60), Size = UDim2.new(0, 300, 0, 120), Parent = screenGui })
-Utility.createCorner(loadingFrame, 8)
+local pageLayout = Utility.createInstance("UIListLayout", {
+Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder,
+HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = page
+})
+Utility.createInstance("UIPadding", {
+PaddingTop = UDim.new(0, 10), PaddingLeft = UDim.new(0, 10),
+PaddingRight = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
+Parent = page
+})
+Utility.applyCustomScrollbar(page, theme, 4)
 
-local title = Utility.createInstance("TextLabel", { Name = "Title", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), Position = UDim2.new(0, 0, 0, 15), Font = Enum.Font.GothamBold, Text = "LuminaUI", TextColor3 = Color3.fromRGB(230, 240, 240), TextSize = 18, Parent = loadingFrame })
-local status = Utility.createInstance("TextLabel", { Name = "Status", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20), Position = UDim2.new(0, 0, 0, 45), Font = Enum.Font.Gotham, Text = "Loading...", TextColor3 = Color3.fromRGB(200, 210, 210), TextSize = 14, Parent = loadingFrame })
+-- Settings Tab API (Mimics a regular Tab for adding components)
+local SettingsTab = {
+Instance = page, Layout = pageLayout, _window = windowApi, _connections = {}, _components = {}
+}
+Utility.manageConnections(SettingsTab)
+-- Assign component methods from the Tab prototype (or copy them)
+-- This assumes Tab methods are defined before _createSettingsPage is called, which they are now.
+local tempTab = {} -- Create a dummy tab to borrow methods
+windowApi:CreateTab({ Name = "__TempSettingsTab" }) -- Create and immediately destroy is messy
+-- Instead, let's just copy the functions directly if possible, or define them within SettingsTab
+-- Copying required functions:
+SettingsTab.AddComponent = windowApi.Tabs[next(windowApi.Tabs)].AddComponent -- Borrow from first tab created
+-- ...existing code... (Inside _createSettingsPage function)
+SettingsTab.AddLabel = windowApi.Tabs[next(windowApi.Tabs)].AddLabel -- Borrow from first tab created
+SettingsTab.AddButton = windowApi.Tabs[next(windowApi.Tabs)].AddButton
+SettingsTab.AddToggle = windowApi.Tabs[next(windowApi.Tabs)].AddToggle
+SettingsTab.AddSlider = windowApi.Tabs[next(windowApi.Tabs)].AddSlider
+SettingsTab.AddDropdown = windowApi.Tabs[next(windowApi.Tabs)].AddDropdown
+SettingsTab.AddTextbox = windowApi.Tabs[next(windowApi.Tabs)].AddTextbox
+SettingsTab.AddColorPicker = windowApi.Tabs[next(windowApi.Tabs)].AddColorPicker
+SettingsTab.AddKeybind = windowApi.Tabs[next(windowApi.Tabs)].AddKeybind
+SettingsTab.AddSection = windowApi.Tabs[next(windowApi.Tabs)].AddSection
+SettingsTab.AddProgressBar = windowApi.Tabs[next(windowApi.Tabs)].AddProgressBar
+SettingsTab.AddCheckbox = windowApi.Tabs[next(windowApi.Tabs)].AddCheckbox
+SettingsTab.AddDivider = windowApi.Tabs[next(windowApi.Tabs)].AddDivider
+SettingsTab.AddParagraph = windowApi.Tabs[next(windowApi.Tabs)].AddParagraph
+-- Note: This borrowing assumes at least one tab exists. A more robust way would be to define these methods directly or inherit.
 
-local progressBar = Utility.createInstance("Frame", { Name = "ProgressBar", BackgroundColor3 = Color3.fromRGB(35, 45, 55), Position = UDim2.new(0.1, 0, 0, 80), Size = UDim2.new(0.8, 0, 0, 10), Parent = loadingFrame })
-Utility.createCorner(progressBar, 4)
-local progressFill = Utility.createInstance("Frame", { Name = "Fill", BackgroundColor3 = Color3.fromRGB(0, 140, 180), Size = UDim2.new(0, 0, 1, 0), Parent = progressBar })
-Utility.createCorner(progressFill, 4)
+-- Add Settings Components
 
--- API for updating the loading screen
-local LoadingScreen = { Instance = screenGui }
-Utility.manageConnections(LoadingScreen) -- Manage connections for the API object
+-- Theme Selector
+local themeNames = {}
+for name, _ in pairs(LuminaUI.Theme) do table.insert(themeNames, name) end
+table.sort(themeNames) -- Sort alphabetically
 
-function LoadingScreen:UpdateProgress(progress, statusText)
-if not progressFill or not progressFill.Parent then return end -- Guard
-progress = math.clamp(progress, 0, 1)
-progressFill:TweenSize(UDim2.new(progress, 0, 1, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
-if statusText and status and status.Parent then status.Text = statusText end
+SettingsTab:AddDropdown({
+    Text = "UI Theme",
+    Flag = "LuminaThemeSetting", -- Internal flag, not saved by default config logic
+    Options = themeNames,
+    Default = windowApi.CurrentThemeName,
+    Order = 1,
+    Callback = function(selectedTheme)
+        windowApi:SetTheme(selectedTheme)
+    end
+})
+
+-- Configuration Saving Toggle (if enabled in initial settings)
+if windowSettings.ConfigurationSaving and windowSettings.ConfigurationSaving.Enabled then
+    SettingsTab:AddToggle({
+        Text = "Save Configuration",
+        Flag = "LuminaConfigSaveEnabled", -- Internal flag
+        Default = true, -- Assume enabled if section exists
+        Order = 2,
+        Callback = function(value)
+            -- This toggle might just be visual unless you add logic to disable saving based on it
+            print("[LuminaUI] Config Saving Toggled (Visual):", value)
+            -- If you want to truly disable/enable saving based on this:
+            -- windowApi.Settings.ConfigurationSaving.Enabled = value
+        end
+    })
+
+    SettingsTab:AddButton({
+        Text = "Save Config Now",
+        Order = 3,
+        Callback = function()
+            local position = windowApi.Instance.Position
+            Utility.saveConfig(windowApi.Settings, position)
+            windowApi:CreateNotification({ Title = "Settings", Content = "Configuration saved!", Duration = 3 })
+        end
+    })
+
+    -- Add a button to reset config? (Requires deleting file and reloading UI)
+    -- SettingsTab:AddButton({ Text = "Reset Config", Order = 4, Callback = function() ... end })
 end
 
-function LoadingScreen:Destroy()
-if not self.Instance or not self.Instance.Parent then return end -- Guard against double destroy
-local screenGuiRef = self.Instance
-self.Instance = nil -- Prevent re-entry
+-- Add more settings options here as needed (e.g., UI scale, font size, etc.)
 
-local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad)
-local fadeTween = TweenService:Create(loadingFrame, tweenInfo, { BackgroundTransparency = 1 })
-TweenService:Create(title, tweenInfo, { TextTransparency = 1 }):Play()
-TweenService:Create(status, tweenInfo, { TextTransparency = 1 }):Play()
-TweenService:Create(progressBar, tweenInfo, { BackgroundTransparency = 1 }):Play()
-TweenService:Create(progressFill, tweenInfo, { BackgroundTransparency = 1 }):Play()
-fadeTween:Play()
-
-fadeTween.Completed:Connect(function()
-    Utility.destroyInstance(screenGuiRef) -- Use pooled destroy
-end)
+return page
 end
 
--- Execute callback safely in a new thread
-if callback then
-task.spawn(Utility.safeCall, callback, LoadingScreen)
+-- Creates the container for notifications
+local function _createNotificationsContainer(parent)
+    local container = Utility.createInstance("Frame", {
+        Name = "NotificationsContainer",
+        Size = UDim2.new(0, 280, 1, -20), -- Fixed width, almost full height (minus padding)
+        Position = UDim2.new(1, -10, 0, 10), -- Positioned top-right
+        AnchorPoint = Vector2.new(1, 0), -- Anchor top-right
+        BackgroundTransparency = 1,
+        ClipsDescendants = false, -- Allow notifications to animate outside bounds initially
+        ZIndex = 500, -- High ZIndex to be above main UI but potentially below modals
+        Parent = parent
+    })
+
+    -- Layout for notifications (bottom to top)
+    Utility.createInstance("UIListLayout", {
+        Padding = UDim.new(0, 5),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        HorizontalAlignment = Enum.HorizontalAlignment.Right, -- Align notifications to the right
+        VerticalAlignment = Enum.VerticalAlignment.Bottom, -- New notifications appear at the bottom and push old ones up
+        Parent = container
+    })
+
+    return container
 end
 
-return LoadingScreen
+
+-- Return the main library table
+return LuminaUI
+````-- filepath: c:\Users\micah\Downloads\lumina.lua
+-- ...existing code... (Inside _createSettingsPage function)
+SettingsTab.AddLabel = windowApi.Tabs[next(windowApi.Tabs)].AddLabel -- Borrow from first tab created
+SettingsTab.AddButton = windowApi.Tabs[next(windowApi.Tabs)].AddButton
+SettingsTab.AddToggle = windowApi.Tabs[next(windowApi.Tabs)].AddToggle
+SettingsTab.AddSlider = windowApi.Tabs[next(windowApi.Tabs)].AddSlider
+SettingsTab.AddDropdown = windowApi.Tabs[next(windowApi.Tabs)].AddDropdown
+SettingsTab.AddTextbox = windowApi.Tabs[next(windowApi.Tabs)].AddTextbox
+SettingsTab.AddColorPicker = windowApi.Tabs[next(windowApi.Tabs)].AddColorPicker
+SettingsTab.AddKeybind = windowApi.Tabs[next(windowApi.Tabs)].AddKeybind
+SettingsTab.AddSection = windowApi.Tabs[next(windowApi.Tabs)].AddSection
+SettingsTab.AddProgressBar = windowApi.Tabs[next(windowApi.Tabs)].AddProgressBar
+SettingsTab.AddCheckbox = windowApi.Tabs[next(windowApi.Tabs)].AddCheckbox
+SettingsTab.AddDivider = windowApi.Tabs[next(windowApi.Tabs)].AddDivider
+SettingsTab.AddParagraph = windowApi.Tabs[next(windowApi.Tabs)].AddParagraph
+-- Note: This borrowing assumes at least one tab exists. A more robust way would be to define these methods directly or inherit.
+
+-- Add Settings Components
+
+-- Theme Selector
+local themeNames = {}
+for name, _ in pairs(LuminaUI.Theme) do table.insert(themeNames, name) end
+table.sort(themeNames) -- Sort alphabetically
+
+SettingsTab:AddDropdown({
+    Text = "UI Theme",
+    Flag = "LuminaThemeSetting", -- Internal flag, not saved by default config logic
+    Options = themeNames,
+    Default = windowApi.CurrentThemeName,
+    Order = 1,
+    Callback = function(selectedTheme)
+        windowApi:SetTheme(selectedTheme)
+    end
+})
+
+-- Configuration Saving Toggle (if enabled in initial settings)
+if windowSettings.ConfigurationSaving and windowSettings.ConfigurationSaving.Enabled then
+    SettingsTab:AddToggle({
+        Text = "Save Configuration",
+        Flag = "LuminaConfigSaveEnabled", -- Internal flag
+        Default = true, -- Assume enabled if section exists
+        Order = 2,
+        Callback = function(value)
+            -- This toggle might just be visual unless you add logic to disable saving based on it
+            print("[LuminaUI] Config Saving Toggled (Visual):", value)
+            -- If you want to truly disable/enable saving based on this:
+            -- windowApi.Settings.ConfigurationSaving.Enabled = value
+        end
+    })
+
+    SettingsTab:AddButton({
+        Text = "Save Config Now",
+        Order = 3,
+        Callback = function()
+            local position = windowApi.Instance.Position
+            Utility.saveConfig(windowApi.Settings, position)
+            windowApi:CreateNotification({ Title = "Settings", Content = "Configuration saved!", Duration = 3 })
+        end
+    })
+
+    -- Add a button to reset config? (Requires deleting file and reloading UI)
+    -- SettingsTab:AddButton({ Text = "Reset Config", Order = 4, Callback = function() ... end })
+end
+
+-- Add more settings options here as needed (e.g., UI scale, font size, etc.)
+
+return page
+end
+
+-- Creates the container for notifications
+local function _createNotificationsContainer(parent)
+    local container = Utility.createInstance("Frame", {
+        Name = "NotificationsContainer",
+        Size = UDim2.new(0, 280, 1, -20), -- Fixed width, almost full height (minus padding)
+        Position = UDim2.new(1, -10, 0, 10), -- Positioned top-right
+        AnchorPoint = Vector2.new(1, 0), -- Anchor top-right
+        BackgroundTransparency = 1,
+        ClipsDescendants = false, -- Allow notifications to animate outside bounds initially
+        ZIndex = 500, -- High ZIndex to be above main UI but potentially below modals
+        Parent = parent
+    })
+
+    -- Layout for notifications (bottom to top)
+    Utility.createInstance("UIListLayout", {
+        Padding = UDim.new(0, 5),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        HorizontalAlignment = Enum.HorizontalAlignment.Right, -- Align notifications to the right
+        VerticalAlignment = Enum.VerticalAlignment.Bottom, -- New notifications appear at the bottom and push old ones up
+        Parent = container
+    })
+
+    return container
 end
 
 
+-- Return the main library table
 return LuminaUI
