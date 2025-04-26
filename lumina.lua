@@ -334,9 +334,6 @@ end
 function Utility.Connect(signal, func)
     if not signal then warn("LuminaUI: Attempted to connect to a nil signal.") return end -- Added check
     local connection = signal:Connect(func)
-    if signal.Instance then -- Store connection associated with the instance if possible
-        Utility.storeConnection(signal.Instance, connection)
-    end
     return connection
 end
 
@@ -630,7 +627,7 @@ function Utility.saveConfig(windowInstance, settings)
         Elements = {}
     }
 
-    for flag, elementData in pairs(LuminaUI.Flags) do
+    for flag, elementData in pairs(LuminaUI.Flags) {
         local value = elementData.Value
         local valueType = type(value)
         -- Only save if value is serializable (basic types + Color3)
