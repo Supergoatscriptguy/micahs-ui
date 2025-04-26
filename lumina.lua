@@ -1019,7 +1019,46 @@ function LuminaUI:CreateWindow(settings)
         end
     end
 
-    -- Load configuration *before* creating UI elements
+    -- Create Loading Screen Overlay
+    local LoadingScreen = Utility.createInstance("ScreenGui", {
+        Name = "LuminaLoading_" .. settings.Name:gsub("%s+", "_"),
+        ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Global,
+        DisplayOrder = 1001, -- Higher than main library initially
+        IgnoreGuiInset = true
+    })
+    local loadingParentGui = get_hui and get_hui() or CoreGui
+    if is_synapse then
+        syn.protect_gui(LoadingScreen)
+        loadingParentGui = CoreGui
+    end
+    LoadingScreen.Parent = loadingParentGui
+
+    local LoadingFrame = Utility.createInstance("Frame", {
+        Name = "LoadingFrame",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = SelectedTheme and SelectedTheme.Background or Color3.fromRGB(25, 25, 25), -- Use theme bg if loaded, else default
+        BackgroundTransparency = 0, -- Start opaque
+        Parent = LoadingScreen
+    })
+
+    -- Simple Loading Spinner (Rotating Icon)
+    local Spinner = Utility.createInstance("ImageLabel", {
+        Name = "Spinner",
+        Size = UDim2.new(0, 50, 0, 50),
+        Position = UDim2.fromScale(0.5, 0.5),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://5107142111", -- Simple spinner image
+        ImageColor3 = SelectedTheme and SelectedTheme.TextColor or Color3.fromRGB(240, 240, 240),
+        Parent = LoadingFrame
+    })
+
+    -- Rotation Animation
+    local rotationTween = TweenService:Create(Spinner, TweenInfo.new(1, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Rotation = 360 })
+    rotationTween:Play()
+
+    -- Load configuration *before* creating main UI elements
     local loadedConfig = Utility.loadConfig(settings)
 
     -- Apply loaded theme if available and valid
@@ -1028,19 +1067,24 @@ function LuminaUI:CreateWindow(settings)
     end
     SelectedTheme = LuminaUI.Theme[settings.Theme] -- Set the active theme
 
+    -- Update loading screen colors based on final theme
+    LoadingFrame.BackgroundColor3 = SelectedTheme.Background
+    Spinner.ImageColor3 = SelectedTheme.TextColor
+
     -- Apply loaded position if available and enabled
     local initialPosition = settings.UIPosition or UDim2.new(0.5, -settings.Size.X.Offset / 2, 0.5, -settings.Size.Y.Offset / 2) -- Default center
     if settings.RememberPosition and loadedConfig.Window and loadedConfig.Window.Position then
         initialPosition = loadedConfig.Window.Position
     end
 
-    -- Create base ScreenGui
+    -- Create base ScreenGui for the main UI
     Library = Utility.createInstance("ScreenGui", {
         Name = "LuminaUI_" .. settings.Name:gsub("%s+", "_"), -- Unique name
         ResetOnSpawn = false,
         ZIndexBehavior = Enum.ZIndexBehavior.Global,
-        DisplayOrder = 1000, -- High display order
-        IgnoreGuiInset = true -- Render over the top bar inset
+        DisplayOrder = 1000, -- Lower than loading screen
+        IgnoreGuiInset = true, -- Render over the top bar inset
+        BackgroundTransparency = 1 -- Start transparent for fade-in effect later? Or keep 1 always.
     })
 
     -- Set Parent (handle different environments)
@@ -1380,7 +1424,7 @@ function LuminaUI:CreateWindow(settings)
         Utility.applyCustomScrollbar(SettingsPage) -- Add scrollbar
 
         local SettingsListLayout = Utility.createInstance("UIListLayout", {
-            Padding = UDim.new(0, 8),
+            Padding = UDim.new(0, 12), -- Increased padding from 8 to 12
             SortOrder = Enum.SortOrder.LayoutOrder,
             Parent = SettingsPage
         })
@@ -1462,12 +1506,16 @@ function LuminaUI:CreateWindow(settings)
 
         -- Theme selector container (using UIGridLayout)
         local ThemeGrid = Utility.createInstance("Frame", {
-            Name = "ThemeGrid", Size = UDim2.new(1, 0, 0, 100), BackgroundTransparency = 1,
+            Name = "ThemeGrid",
+            AutomaticSize = Enum.AutomaticSize.Y, -- Automatically adjust height based on content
+            BackgroundTransparency = 1,
             LayoutOrder = 2, Parent = SettingsPage
         })
         local ThemeGridLayout = Utility.createInstance("UIGridLayout", {
             CellPadding = UDim2.new(0, 10, 0, 10), CellSize = UDim2.new(0, 100, 0, 100),
             HorizontalAlignment = Enum.HorizontalAlignment.Left, SortOrder = Enum.SortOrder.LayoutOrder,
+            FillDirection = Enum.FillDirection.Horizontal, -- Ensure horizontal filling
+            StartCorner = Enum.StartCorner.TopLeft, -- Start placing items from the top-left
             Parent = ThemeGrid
         })
 
@@ -1663,20 +1711,23 @@ function LuminaUI:CreateWindow(settings)
     -- Button Functionality
     Utility.Connect(CloseButton.MouseButton1Click, function()
         -- Save config before closing if enabled
-        if settings.ConfigurationSaving and settings.ConfigurationSaving.Enabled then
+        if settings.ConfigurationSaving and settings.ConfigurationSaving.Enabled and MainFrame and MainFrame.Parent then -- Added check for MainFrame validity
             Utility.saveConfig(MainFrame, settings)
         end
 
         -- Optional: Fade out animation
-        local fadeInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-        local tween = TweenService:Create(MainFrame, fadeInfo, { BackgroundTransparency = 1, Size = UDim2.new(MainFrame.Size.X.Scale, MainFrame.Size.X.Offset * 0.8, MainFrame.Size.Y.Scale, MainFrame.Size.Y.Offset * 0.8), Position = MainFrame.Position + UDim2.fromOffset(MainFrame.Size.X.Offset * 0.1, MainFrame.Size.Y.Offset * 0.1) }) -- Shrink and fade
-        tween:Play()
-        Utility.Connect(tween.Completed, function()
-             Utility.destroyInstance(Library) -- Use pooled destroy
-             Library = nil -- Clear reference
-             LuminaUI._Instances = {} -- Clear tracked instances
-             if LuminaUI._KeybindListener then LuminaUI._KeybindListener:Disconnect(); LuminaUI._KeybindListener = nil end -- Disconnect listener
-        end)
+        if MainFrame and MainFrame.Parent then -- Check if MainFrame is still valid before animating
+            local fadeInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+            -- Animate the Library (ScreenGui) directly for a full fade out
+            local tween = TweenService:Create(Library, fadeInfo, { BackgroundTransparency = 1 }) -- Fade the whole ScreenGui
+            tween:Play()
+            Utility.Connect(tween.Completed, function()
+                 LuminaUI:Destroy() -- Call the main cleanup function
+            end)
+        else
+            -- If MainFrame is already gone, just call Destroy immediately
+            LuminaUI:Destroy()
+        end
     end)
 
     local minimized = false
@@ -2101,1871 +2152,1882 @@ function LuminaUI:CreateWindow(settings)
             local stroke = Utility.createStroke(ButtonFrame, SelectedTheme.ElementStroke, 1)
 
             local textXOffset = elementPadding
--- ...existing code...
-if icon then
-    local ButtonIcon = Utility.createInstance("ImageLabel", {
-        Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
-        ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = ButtonFrame
-    })
-    textXOffset = elementPadding + iconSize + 8 -- Add padding
-end
-
-local ButtonLabel = Utility.createInstance("TextLabel", {
-   Name = "Label", Size = UDim2.new(1, -(textXOffset + elementPadding), 1, 0), Position = UDim2.new(0, textXOffset, 0, 0),
-   BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = buttonName, TextColor3 = SelectedTheme.TextColor,
-   TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = ButtonFrame
-})
-
-local ButtonInteract = Utility.createInstance("TextButton", {
-   Name = "Interact", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = ButtonFrame
-})
-
--- Effects & Callback
-Utility.Connect(ButtonInteract.MouseEnter, function()
-   TweenService:Create(ButtonFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackgroundHover }):Play()
-   stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
-   if tooltip then Utility.showTooltip(tooltip) end
-end)
-Utility.Connect(ButtonInteract.MouseLeave, function()
-   TweenService:Create(ButtonFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackground }):Play()
-   stroke.Color = SelectedTheme.ElementStroke
-   if tooltip then Utility.hideTooltip() end
-end)
-Utility.Connect(ButtonInteract.MouseButton1Down, function()
-    TweenService:Create(ButtonFrame, TweenInfo.new(0.1), { BackgroundColor3 = SelectedTheme.ElementBackgroundActive or Utility.darker(SelectedTheme.ElementBackgroundHover, 0.1) }):Play()
-    Utility.rippleEffect(ButtonFrame, Utility.lighter(SelectedTheme.ElementBackgroundHover, 0.2))
-end)
-Utility.Connect(ButtonInteract.MouseButton1Up, function()
-    TweenService:Create(ButtonFrame, TweenInfo.new(0.1), { BackgroundColor3 = SelectedTheme.ElementBackgroundHover }):Play()
-end)
-Utility.Connect(ButtonInteract.MouseButton1Click, function()
-   -- Execute callback in protected call
-   local success, err = pcall(callback)
-   if not success then warn("LuminaUI Button Error:", err) end
-end)
-
-Tab.Elements[buttonName] = { Instance = ButtonFrame, Type = "Button" }
-return ButtonFrame -- Return instance for potential direct manipulation
-end
-
--- CreateToggle (Refactored with Theme Update)
-function Tab:CreateToggle(options)
-options = options or {}
-local toggleName = options.Name or "Toggle"
-local flag = options.Flag -- Mandatory flag name
-local defaultValue = options.Default or false
-local callback = options.Callback or function(value) print(toggleName .. " set to " .. tostring(value)) end
-local icon = options.Icon
-local tooltip = options.Tooltip
-
-if not flag then warn("LuminaUI: Toggle '" .. toggleName .. "' requires a 'Flag' option."); return end
-
-local initialValue = registerFlag(flag, defaultValue, "Toggle")
-
-local elementHeight = 36
-local elementPadding = 10
-local iconSize = 20
-local toggleWidth = 40
-local toggleHeight = 20
-local knobSize = 16
-
-local updateTheme = function(instance)
-   local toggleSwitch = instance:FindFirstChild("ToggleSwitch")
-   local knob = toggleSwitch and toggleSwitch:FindFirstChild("Knob")
-   local iconLabel = instance:FindFirstChild("Icon")
-   local label = instance:FindFirstChild("Label")
-   local stroke = instance:FindFirstChildOfClass("UIStroke")
-
-   instance.BackgroundColor3 = SelectedTheme.ElementBackground
-   if stroke then stroke.Color = SelectedTheme.ElementStroke end
-   if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
-   if label then label.TextColor3 = SelectedTheme.TextColor end
-
-   -- Update toggle colors based on current state
-   local currentValue = LuminaUI.Flags[flag].Value
-   if toggleSwitch then
-       toggleSwitch.BackgroundColor3 = currentValue and (SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled) or SelectedTheme.ToggleDisabled
-   end
-   if knob then
-       knob.BackgroundColor3 = SelectedTheme.TextColor -- Knob color usually constant
-   end
-end
-
-local ToggleFrame = Utility.createInstance("Frame", {
-   Name = "Toggle_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
-   BackgroundColor3 = SelectedTheme.ElementBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
-}, "Toggle", updateTheme) -- Track Toggle
-Utility.createCorner(ToggleFrame, 4)
-local stroke = Utility.createStroke(ToggleFrame, SelectedTheme.ElementStroke, 1)
-
-local textXOffset = elementPadding
-if icon then
-    local ToggleIcon = Utility.createInstance("ImageLabel", {
-        Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
-        ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = ToggleFrame
-    })
-    textXOffset = elementPadding + iconSize + 8
-end
-
-local ToggleLabel = Utility.createInstance("TextLabel", {
-   Name = "Label", Size = UDim2.new(1, -(textXOffset + elementPadding + toggleWidth + 10), 1, 0), -- Adjust width for toggle switch
-   Position = UDim2.new(0, textXOffset, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
-   Text = toggleName, TextColor3 = SelectedTheme.TextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = ToggleFrame
-})
-
--- Toggle Switch Visual
-local ToggleSwitch = Utility.createInstance("Frame", {
-   Name = "ToggleSwitch", Size = UDim2.new(0, toggleWidth, 0, toggleHeight), Position = UDim2.new(1, -elementPadding, 0.5, 0),
-   AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = initialValue and (SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled) or SelectedTheme.ToggleDisabled,
-   Parent = ToggleFrame
-})
-Utility.createCorner(ToggleSwitch, toggleHeight / 2)
-
-local ToggleKnob = Utility.createInstance("Frame", {
-   Name = "Knob", Size = UDim2.new(0, knobSize, 0, knobSize), Position = initialValue and UDim2.new(1, -2, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
-   AnchorPoint = initialValue and Vector2.new(1, 0.5) or Vector2.new(0, 0.5), BackgroundColor3 = SelectedTheme.TextColor,
-   Parent = ToggleSwitch
-})
-Utility.createCorner(ToggleKnob, knobSize / 2)
-
-local ToggleInteract = Utility.createInstance("TextButton", {
-   Name = "Interact", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = ToggleFrame
-})
-
--- Toggle Logic
-local function setToggleState(newState, triggerCallback)
-   triggerCallback = triggerCallback == nil and true or triggerCallback -- Default to true
-   local oldState = LuminaUI.Flags[flag].Value
-   if oldState == newState then return end -- No change
-
-   LuminaUI.Flags[flag].Value = newState
-
-   local targetColor = newState and (SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled) or SelectedTheme.ToggleDisabled
-   local targetKnobPos = newState and UDim2.new(1, -2, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
-   local targetKnobAnchor = newState and Vector2.new(1, 0.5) or Vector2.new(0, 0.5)
-
-   local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-   TweenService:Create(ToggleSwitch, tweenInfo, { BackgroundColor3 = targetColor }):Play()
-   TweenService:Create(ToggleKnob, tweenInfo, { Position = targetKnobPos, AnchorPoint = targetKnobAnchor }):Play()
-
-   if triggerCallback then
-       local success, err = pcall(callback, newState)
-       if not success then warn("LuminaUI Toggle Error:", err) end
-   end
-end
-
--- Effects & Callback
-Utility.Connect(ToggleInteract.MouseEnter, function()
-   TweenService:Create(ToggleFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackgroundHover }):Play()
-   stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
-   if tooltip then Utility.showTooltip(tooltip) end
-end)
-Utility.Connect(ToggleInteract.MouseLeave, function()
-   TweenService:Create(ToggleFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackground }):Play()
-   stroke.Color = SelectedTheme.ElementStroke
-   if tooltip then Utility.hideTooltip() end
-end)
-Utility.Connect(ToggleInteract.MouseButton1Click, function()
-   setToggleState(not LuminaUI.Flags[flag].Value) -- Toggle state and trigger callback
-end)
-
--- API to update toggle state externally
-local ToggleAPI = {
-   Instance = ToggleFrame,
-   Type = "Toggle",
-   Flag = flag,
-   SetValue = function(newValue)
-       setToggleState(newValue, false) -- Set value without triggering callback
-   end,
-   GetValue = function()
-       return LuminaUI.Flags[flag].Value
-   end
-}
-Tab.Elements[flag] = ToggleAPI -- Store API under flag name
-
-return ToggleAPI
-end
-
--- CreateSlider (Refactored with Theme Update)
-function Tab:CreateSlider(options)
-options = options or {}
-local sliderName = options.Name or "Slider"
-local flag = options.Flag -- Mandatory flag name
-local min = options.Min or 0
-local max = options.Max or 100
-local step = options.Step or 1 -- Increment value
-local defaultValue = options.Default or min
-local units = options.Units or "" -- e.g., "%", "ms"
-local callback = options.Callback or function(value) print(sliderName .. " set to " .. value) end
-local icon = options.Icon
-local tooltip = options.Tooltip
-
-if not flag then warn("LuminaUI: Slider '" .. sliderName .. "' requires a 'Flag' option."); return end
-
--- Clamp default value and ensure it aligns with step
-defaultValue = math.clamp(defaultValue, min, max)
-defaultValue = math.floor((defaultValue - min) / step + 0.5) * step + min -- Snap to nearest step
-
-local initialValue = registerFlag(flag, defaultValue, "Slider")
-
-local elementHeight = 50 -- Taller for slider
-local elementPadding = 10
-local iconSize = 20
-local sliderHeight = 6
-local knobSize = 14
-
-local updateTheme = function(instance)
-   local sliderTrack = instance:FindFirstChild("SliderTrack")
-   local progress = sliderTrack and sliderTrack:FindFirstChild("Progress")
-   local knob = sliderTrack and sliderTrack:FindFirstChild("Knob")
-   local iconLabel = instance:FindFirstChild("Icon")
-   local label = instance:FindFirstChild("Label")
-   local valueLabel = instance:FindFirstChild("ValueLabel")
-   local stroke = instance:FindFirstChildOfClass("UIStroke")
-
-   instance.BackgroundColor3 = SelectedTheme.ElementBackground
-   if stroke then stroke.Color = SelectedTheme.ElementStroke end
-   if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
-   if label then label.TextColor3 = SelectedTheme.TextColor end
-   if valueLabel then valueLabel.TextColor3 = SelectedTheme.SubTextColor end
-
-   if sliderTrack then sliderTrack.BackgroundColor3 = SelectedTheme.SliderBackground end
-   if progress then progress.BackgroundColor3 = SelectedTheme.AccentColor or SelectedTheme.SliderProgress end
-   if knob then knob.BackgroundColor3 = SelectedTheme.TextColor end -- Knob color usually constant
-end
-
-local SliderFrame = Utility.createInstance("Frame", {
-   Name = "Slider_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
-   BackgroundColor3 = SelectedTheme.ElementBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
-}, "Slider", updateTheme) -- Track Slider
-Utility.createCorner(SliderFrame, 4)
-local stroke = Utility.createStroke(SliderFrame, SelectedTheme.ElementStroke, 1)
-
-local topRowHeight = 20
-local bottomRowY = topRowHeight + 5
-
--- Icon (Top Row)
-local textXOffset = elementPadding
-if icon then
-    local SliderIcon = Utility.createInstance("ImageLabel", {
-        Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0, topRowHeight / 2),
-        AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
-        ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = SliderFrame
-    })
-    textXOffset = elementPadding + iconSize + 8
-end
-
--- Label (Top Row)
-local SliderLabel = Utility.createInstance("TextLabel", {
-   Name = "Label", Size = UDim2.new(0.6, 0, 0, topRowHeight), Position = UDim2.new(0, textXOffset, 0, 0),
-   BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = sliderName, TextColor3 = SelectedTheme.TextColor,
-   TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Center, Parent = SliderFrame
-})
-
--- Value Label (Top Row)
-local ValueLabel = Utility.createInstance("TextLabel", {
-   Name = "ValueLabel", Size = UDim2.new(0.4, -elementPadding, 0, topRowHeight), Position = UDim2.new(1, -elementPadding, 0, 0),
-   AnchorPoint = Vector2.new(1, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = "", -- Updated later
-   TextColor3 = SelectedTheme.SubTextColor, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Right, TextYAlignment = Enum.TextYAlignment.Center, Parent = SliderFrame
-})
-
--- Slider Track (Bottom Row)
-local SliderTrack = Utility.createInstance("Frame", {
-   Name = "SliderTrack", Size = UDim2.new(1, -(elementPadding * 2), 0, sliderHeight), Position = UDim2.new(0.5, 0, 0, bottomRowY + sliderHeight / 2),
-   AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = SelectedTheme.SliderBackground, Parent = SliderFrame
-})
-Utility.createCorner(SliderTrack, sliderHeight / 2)
-
--- Progress Bar
-local Progress = Utility.createInstance("Frame", {
-   Name = "Progress", Size = UDim2.new(0, 0, 1, 0), -- Width updated later
-   BackgroundColor3 = SelectedTheme.AccentColor or SelectedTheme.SliderProgress, Parent = SliderTrack
-})
-Utility.createCorner(Progress, sliderHeight / 2)
-
--- Knob
-local Knob = Utility.createInstance("Frame", {
-   Name = "Knob", Size = UDim2.new(0, knobSize, 0, knobSize), Position = UDim2.new(0, 0, 0.5, 0), -- X updated later
-   AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = SelectedTheme.TextColor, Parent = SliderTrack
-})
-Utility.createCorner(Knob, knobSize / 2)
-
--- Slider Logic
-local isDragging = false
-local function updateSlider(newValue, triggerCallback)
-   triggerCallback = triggerCallback == nil and true or triggerCallback -- Default to true
-
-   -- Clamp and snap to step
-   newValue = math.clamp(newValue, min, max)
-   newValue = math.floor((newValue - min) / step + 0.5) * step + min
-
-   local oldValue = LuminaUI.Flags[flag].Value
-   if oldValue == newValue then return end -- No change
-
-   LuminaUI.Flags[flag].Value = newValue
-
-   -- Update visuals
-   local percent = (newValue - min) / (max - min)
-   if max == min then percent = 0 end -- Avoid division by zero
-
-   Progress.Size = UDim2.new(percent, 0, 1, 0)
-   Knob.Position = UDim2.new(percent, 0, 0.5, 0)
-   ValueLabel.Text = Utility.formatNumber(newValue, step < 1 and 1 or 0) .. units -- Show decimal if step is fractional
-
-   if triggerCallback then
-       local success, err = pcall(callback, newValue)
-       if not success then warn("LuminaUI Slider Error:", err) end
-   end
-end
-
--- Initial update
-updateSlider(initialValue, false)
-
--- Interaction
-local SliderInteract = Utility.createInstance("TextButton", {
-   Name = "Interact", Size = UDim2.new(1, 0, 0, elementHeight - bottomRowY + knobSize), -- Cover track and knob area
-   Position = UDim2.new(0, 0, 0, bottomRowY - knobSize/2), BackgroundTransparency = 1, Text = "", ZIndex = 2, Parent = SliderFrame
-})
-
-local function handleInput(input)
-   local mouseX = input.Position.X
-   local trackStartX = SliderTrack.AbsolutePosition.X
-   local trackWidth = SliderTrack.AbsoluteSize.X
-
-   local relativeX = math.clamp((mouseX - trackStartX) / trackWidth, 0, 1)
-   local newValue = min + relativeX * (max - min)
-   updateSlider(newValue) -- Update and trigger callback
-end
-
-Utility.Connect(SliderInteract.InputBegan, function(input)
-   if input.UserInputType == Enum.UserInputType.MouseButton1 then
-       isDragging = true
-       handleInput(input) -- Update on initial click
-       Utility.pulseEffect(Knob, 1.2, 0.1)
-       if tooltip then Utility.showTooltip(tooltip) end
-       -- Prevent text selection while dragging
-       UserInputService.TextSelectionEnabled = false
-   end
-end)
-
-Utility.Connect(UserInputService.InputEnded, function(input)
-   if input.UserInputType == Enum.UserInputType.MouseButton1 and isDragging then
-       isDragging = false
-       if tooltip then Utility.hideTooltip() end
-       -- Re-enable text selection
-       UserInputService.TextSelectionEnabled = true
-   end
-end)
-
-Utility.Connect(UserInputService.InputChanged, function(input)
-   if input.UserInputType == Enum.UserInputType.MouseMovement and isDragging then
-       handleInput(input)
-   end
-end)
-
--- Hover effect on the main frame
-Utility.Connect(SliderFrame.MouseEnter, function()
-    stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
-end)
-Utility.Connect(SliderFrame.MouseLeave, function()
-    if not isDragging then stroke.Color = SelectedTheme.ElementStroke end
-end)
-
--- API to update slider state externally
-local SliderAPI = {
-   Instance = SliderFrame,
-   Type = "Slider",
-   Flag = flag,
-   SetValue = function(newValue)
-       updateSlider(newValue, false) -- Set value without triggering callback
-   end,
-   GetValue = function()
-       return LuminaUI.Flags[flag].Value
-   end
-}
-Tab.Elements[flag] = SliderAPI -- Store API under flag name
-
-return SliderAPI
-end
-
--- CreateDropdown (Refactored with Theme Update)
-function Tab:CreateDropdown(options)
-options = options or {}
-local dropdownName = options.Name or "Dropdown"
-local flag = options.Flag -- Mandatory flag name
-local values = options.Values or {} -- List of strings
-local defaultValue = options.Default or (values[1] or "")
-local allowMultiSelect = options.MultiSelect or false
-local callback = options.Callback or function(value) print(dropdownName .. " selected: " .. table.concat(value, ", ")) end
-local icon = options.Icon
-local tooltip = options.Tooltip
-
-if not flag then warn("LuminaUI: Dropdown '" .. dropdownName .. "' requires a 'Flag' option."); return end
-if #values == 0 then warn("LuminaUI: Dropdown '" .. dropdownName .. "' has no values."); return end
-
--- Validate default value(s)
-local initialValue
-if allowMultiSelect then
-   defaultValue = type(defaultValue) == "table" and defaultValue or {defaultValue}
-   initialValue = {}
-   for _, v in ipairs(defaultValue) do
-       if table.find(values, v) then table.insert(initialValue, v) end
-   end
-   if #initialValue == 0 and #values > 0 then initialValue = {} end -- Default to empty if invalid default provided
-else
-   if not table.find(values, defaultValue) then defaultValue = values[1] end
-   initialValue = defaultValue
-end
-
-local currentValue = registerFlag(flag, initialValue, "Dropdown")
-
-local elementHeight = 36
-local elementPadding = 10
-local iconSize = 20
-local arrowSize = 12
-local dropdownOpen = false
-local dropdownList = nil -- Instance reference
-
-local updateTheme = function(instance)
-   local arrow = instance:FindFirstChild("Arrow")
-   local iconLabel = instance:FindFirstChild("Icon")
-   local label = instance:FindFirstChild("Label")
-   local valueLabel = instance:FindFirstChild("ValueLabel")
-   local stroke = instance:FindFirstChildOfClass("UIStroke")
-
-   instance.BackgroundColor3 = SelectedTheme.ElementBackground
-   if stroke then stroke.Color = SelectedTheme.ElementStroke end
-   if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
-   if label then label.TextColor3 = SelectedTheme.TextColor end
-   if valueLabel then valueLabel.TextColor3 = SelectedTheme.SubTextColor end
-   if arrow then arrow.ImageColor3 = SelectedTheme.SubTextColor end
-
-   -- Update dropdown list theme if open
-   if dropdownList and dropdownList.Parent then
-       dropdownList.BackgroundColor3 = SelectedTheme.DropdownUnselected
-       local listStroke = dropdownList:FindFirstChildOfClass("UIStroke")
-       if listStroke then listStroke.Color = SelectedTheme.ElementStroke end
-       -- Update individual option themes
-       for _, optionFrame in ipairs(dropdownList.ListFrame:GetChildren()) do
-           if optionFrame:IsA("Frame") then
-               local optionLabel = optionFrame:FindFirstChild("Label")
-               local checkmark = optionFrame:FindFirstChild("Checkmark")
-               local isSelected = false
-               if allowMultiSelect then
-                   isSelected = table.find(LuminaUI.Flags[flag].Value, optionLabel.Text)
-               else
-                   isSelected = LuminaUI.Flags[flag].Value == optionLabel.Text
-               end
-
-               optionFrame.BackgroundColor3 = isSelected and SelectedTheme.DropdownSelected or SelectedTheme.DropdownUnselected
-               if optionLabel then optionLabel.TextColor3 = SelectedTheme.TextColor end
-               if checkmark then
-                   checkmark.ImageColor3 = SelectedTheme.TextColor
-                   checkmark.Visible = isSelected
-               end
+            if icon then
+                local ButtonIcon = Utility.createInstance("ImageLabel", {
+                    Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
+                    AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
+                    ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = ButtonFrame
+                })
+                textXOffset = elementPadding + iconSize + 8 -- Add padding
+            end
+
+            local ButtonLabel = Utility.createInstance("TextLabel", {
+               Name = "Label", Size = UDim2.new(1, -(textXOffset + elementPadding), 1, 0), Position = UDim2.new(0, textXOffset, 0, 0),
+               BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = buttonName, TextColor3 = SelectedTheme.TextColor,
+               TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = ButtonFrame
+            })
+
+            local ButtonInteract = Utility.createInstance("TextButton", {
+               Name = "Interact", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = ButtonFrame
+            })
+
+            -- Effects & Callback
+            Utility.Connect(ButtonInteract.MouseEnter, function()
+               TweenService:Create(ButtonFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackgroundHover }):Play()
+               stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
+               if tooltip then Utility.showTooltip(tooltip) end
+            end)
+            Utility.Connect(ButtonInteract.MouseLeave, function()
+               TweenService:Create(ButtonFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackground }):Play()
+               stroke.Color = SelectedTheme.ElementStroke
+               if tooltip then Utility.hideTooltip() end
+            end)
+            Utility.Connect(ButtonInteract.MouseButton1Down, function()
+                TweenService:Create(ButtonFrame, TweenInfo.new(0.1), { BackgroundColor3 = SelectedTheme.ElementBackgroundActive or Utility.darker(SelectedTheme.ElementBackgroundHover, 0.1) }):Play()
+                Utility.rippleEffect(ButtonFrame, Utility.lighter(SelectedTheme.ElementBackgroundHover, 0.2))
+            end)
+            Utility.Connect(ButtonInteract.MouseButton1Up, function()
+                TweenService:Create(ButtonFrame, TweenInfo.new(0.1), { BackgroundColor3 = SelectedTheme.ElementBackgroundHover }):Play()
+            end)
+            Utility.Connect(ButtonInteract.MouseButton1Click, function()
+               -- Execute callback in protected call
+               local success, err = pcall(callback)
+               if not success then warn("LuminaUI Button Error:", err) end
+            end)
+
+            Tab.Elements[buttonName] = { Instance = ButtonFrame, Type = "Button" }
+            return ButtonFrame -- Return instance for potential direct manipulation
+        end
+
+        -- CreateToggle (Refactored with Theme Update)
+        function Tab:CreateToggle(options)
+        options = options or {}
+        local toggleName = options.Name or "Toggle"
+        local flag = options.Flag -- Mandatory flag name
+        local defaultValue = options.Default or false
+        local callback = options.Callback or function(value) print(toggleName .. " set to " .. tostring(value)) end
+        local icon = options.Icon
+        local tooltip = options.Tooltip
+
+        if not flag then warn("LuminaUI: Toggle '" .. toggleName .. "' requires a 'Flag' option."); return end
+
+        local initialValue = registerFlag(flag, defaultValue, "Toggle")
+
+        local elementHeight = 36
+        local elementPadding = 10
+        local iconSize = 20
+        local toggleWidth = 40
+        local toggleHeight = 20
+        local knobSize = 16
+
+        local updateTheme = function(instance)
+           local toggleSwitch = instance:FindFirstChild("ToggleSwitch")
+           local knob = toggleSwitch and toggleSwitch:FindFirstChild("Knob")
+           local iconLabel = instance:FindFirstChild("Icon")
+           local label = instance:FindFirstChild("Label")
+           local stroke = instance:FindFirstChildOfClass("UIStroke")
+
+           instance.BackgroundColor3 = SelectedTheme.ElementBackground
+           if stroke then stroke.Color = SelectedTheme.ElementStroke end
+           if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
+           if label then label.TextColor3 = SelectedTheme.TextColor end
+
+           -- Update toggle colors based on current state
+           local currentValue = LuminaUI.Flags[flag].Value
+           if toggleSwitch then
+               toggleSwitch.BackgroundColor3 = currentValue and (SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled) or SelectedTheme.ToggleDisabled
            end
-       end
-   end
-end
-
-local DropdownFrame = Utility.createInstance("Frame", {
-   Name = "Dropdown_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
-   BackgroundColor3 = SelectedTheme.ElementBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage,
-   ClipsDescendants = false -- Allow dropdown list to show
-}, "Dropdown", updateTheme) -- Track Dropdown
-Utility.createCorner(DropdownFrame, 4)
-local stroke = Utility.createStroke(DropdownFrame, SelectedTheme.ElementStroke, 1)
-
-local textXOffset = elementPadding
-if icon then
-    local DropdownIcon = Utility.createInstance("ImageLabel", {
-        Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
-        ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = DropdownFrame
-    })
-    textXOffset = elementPadding + iconSize + 8
-end
-
--- Label
-local DropdownLabel = Utility.createInstance("TextLabel", {
-   Name = "Label", Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(0, textXOffset, 0, 0),
-   BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = dropdownName, TextColor3 = SelectedTheme.TextColor,
-   TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = DropdownFrame
-})
-
--- Value Label (Shows selected value/count)
-local ValueLabel = Utility.createInstance("TextLabel", {
-   Name = "ValueLabel", Size = UDim2.new(0.5, -(elementPadding + arrowSize + 5 + elementPadding), 1, 0), Position = UDim2.new(1, -(elementPadding + arrowSize + 5), 0, 0),
-   AnchorPoint = Vector2.new(1, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = "", -- Updated later
-   TextColor3 = SelectedTheme.SubTextColor, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Right, Parent = DropdownFrame
-})
-
--- Arrow Icon
-local Arrow = Utility.createInstance("ImageLabel", {
-   Name = "Arrow", Size = UDim2.new(0, arrowSize, 0, arrowSize), Position = UDim2.new(1, -elementPadding, 0.5, 0),
-   AnchorPoint = Vector2.new(1, 0.5), BackgroundTransparency = 1, Image = "rbxassetid://6035048680", -- Chevron down
-   ImageColor3 = SelectedTheme.SubTextColor, Rotation = 0, Parent = DropdownFrame
-})
-
--- Interaction Button
-local DropdownInteract = Utility.createInstance("TextButton", {
-   Name = "Interact", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 1, Parent = DropdownFrame
-})
-
--- Function to update the displayed value text
-local function updateValueLabel()
-   local currentVal = LuminaUI.Flags[flag].Value
-   if allowMultiSelect then
-       local count = #currentVal
-       ValueLabel.Text = count .. (#values == count and " (All)" or " Selected")
-   else
-       ValueLabel.Text = currentVal
-   end
-end
-updateValueLabel() -- Initial update
-
--- Function to create/destroy the dropdown list
-local function toggleDropdownList(forceClose)
-   if dropdownOpen and not forceClose then -- Close it
-       dropdownOpen = false
-       TweenService:Create(Arrow, TweenInfo.new(0.2), { Rotation = 0 }):Play()
-       if dropdownList and dropdownList.Parent then
-           local listTween = TweenService:Create(dropdownList, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1 })
-           listTween:Play()
-           Utility.Connect(listTween.Completed, function()
-               Utility.destroyInstance(dropdownList)
-               dropdownList = nil
-           end)
-       end
-       stroke.Color = SelectedTheme.ElementStroke -- Reset stroke on close
-       if tooltip then Utility.hideTooltip() end -- Hide tooltip when closing
-
-   elseif not dropdownOpen and not forceClose then -- Open it
-       dropdownOpen = true
-       TweenService:Create(Arrow, TweenInfo.new(0.2), { Rotation = 180 }):Play()
-       stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled -- Highlight stroke when open
-
-       local listHeight = math.min(#values * 30 + 10, 160) -- Max height 160px
-       local listYPos = elementHeight + 2
-
-       -- Theme update function for the list itself
-       local updateListTheme = function(instance)
-           instance.BackgroundColor3 = SelectedTheme.DropdownUnselected
-           local listStroke = instance:FindFirstChildOfClass("UIStroke")
-           if listStroke then listStroke.Color = SelectedTheme.ElementStroke end
-           -- Option updates are handled by the main dropdown updateTheme
-       end
-
-       dropdownList = Utility.createInstance("Frame", {
-           Name = "DropdownList", Size = UDim2.new(1, 0, 0, 0), -- Start height 0 for animation
-           Position = UDim2.new(0, 0, 0, listYPos), BackgroundColor3 = SelectedTheme.DropdownUnselected,
-           BackgroundTransparency = 1, BorderSizePixel = 0, ClipsDescendants = true, ZIndex = 100, Parent = DropdownFrame
-       }, "DropdownListContainer", updateListTheme) -- Track list container
-       Utility.createCorner(dropdownList, 4)
-       Utility.createStroke(dropdownList, SelectedTheme.ElementStroke, 1)
-
-       local listScroll = Utility.createInstance("ScrollingFrame", {
-           Name = "ListFrame", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0,
-           CanvasSize = UDim2.new(0, 0, 0, #values * 30), ScrollBarThickness = 4, Parent = dropdownList
-       })
-       Utility.applyCustomScrollbar(listScroll, 4) -- Apply thin scrollbar
-
-       local listLayout = Utility.createInstance("UIListLayout", {
-           Padding = UDim.new(0, 0), SortOrder = Enum.SortOrder.LayoutOrder, Parent = listScroll
-       })
-       local listPadding = Utility.createInstance("UIPadding", {
-           PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5),
-           PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5), Parent = listScroll
-       })
-
-       -- Create options
-       for i, value in ipairs(values) do
-           local isSelected
-           if allowMultiSelect then
-               isSelected = table.find(LuminaUI.Flags[flag].Value, value)
-           else
-               isSelected = LuminaUI.Flags[flag].Value == value
+           if knob then
+               knob.BackgroundColor3 = SelectedTheme.TextColor -- Knob color usually constant
            end
+        end
 
-           local OptionFrame = Utility.createInstance("Frame", {
-               Name = "Option_" .. value:gsub("%s+", "_"), Size = UDim2.new(1, 0, 0, 30),
-               BackgroundColor3 = isSelected and SelectedTheme.DropdownSelected or SelectedTheme.DropdownUnselected,
-               LayoutOrder = i, Parent = listScroll
-           })
-           Utility.createCorner(OptionFrame, 3)
+        local ToggleFrame = Utility.createInstance("Frame", {
+           Name = "Toggle_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
+           BackgroundColor3 = SelectedTheme.ElementBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
+        }, "Toggle", updateTheme) -- Track Toggle
+        Utility.createCorner(ToggleFrame, 4)
+        local stroke = Utility.createStroke(ToggleFrame, SelectedTheme.ElementStroke, 1)
 
-           local OptionLabel = Utility.createInstance("TextLabel", {
-               Name = "Label", Size = UDim2.new(1, -30, 1, 0), Position = UDim2.new(0, 10, 0, 0),
-               BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = value, TextColor3 = SelectedTheme.TextColor,
-               TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = OptionFrame
-           })
+        local textXOffset = elementPadding
+        if icon then
+            local ToggleIcon = Utility.createInstance("ImageLabel", {
+                Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
+                AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
+                ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = ToggleFrame
+            })
+            textXOffset = elementPadding + iconSize + 8
+        end
 
-           local Checkmark = nil
-           if allowMultiSelect then
-               Checkmark = Utility.createInstance("ImageLabel", {
-                   Name = "Checkmark", Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -15, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5),
-                   BackgroundTransparency = 1, Image = "rbxassetid://6031280882", -- Checkmark/Settings icon placeholder
-                   ImageColor3 = SelectedTheme.TextColor, Visible = isSelected, Parent = OptionFrame
-               })
+        local ToggleLabel = Utility.createInstance("TextLabel", {
+           Name = "Label", Size = UDim2.new(1, -(textXOffset + elementPadding + toggleWidth + 10), 1, 0), -- Adjust width for toggle switch
+           Position = UDim2.new(0, textXOffset, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+           Text = toggleName, TextColor3 = SelectedTheme.TextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = ToggleFrame
+        })
+
+        -- Toggle Switch Visual
+        local ToggleSwitch = Utility.createInstance("Frame", {
+           Name = "ToggleSwitch", Size = UDim2.new(0, toggleWidth, 0, toggleHeight), Position = UDim2.new(1, -elementPadding, 0.5, 0),
+           AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = initialValue and (SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled) or SelectedTheme.ToggleDisabled,
+           Parent = ToggleFrame
+        })
+        Utility.createCorner(ToggleSwitch, toggleHeight / 2)
+
+        local ToggleKnob = Utility.createInstance("Frame", {
+           Name = "Knob", Size = UDim2.new(0, knobSize, 0, knobSize), Position = initialValue and UDim2.new(1, -2, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
+           AnchorPoint = initialValue and Vector2.new(1, 0.5) or Vector2.new(0, 0.5), BackgroundColor3 = SelectedTheme.TextColor,
+           Parent = ToggleSwitch
+        })
+        Utility.createCorner(ToggleKnob, knobSize / 2)
+
+        local ToggleInteract = Utility.createInstance("TextButton", {
+           Name = "Interact", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = ToggleFrame
+        })
+
+        -- Toggle Logic
+        local function setToggleState(newState, triggerCallback)
+           triggerCallback = triggerCallback == nil and true or triggerCallback -- Default to true
+           local oldState = LuminaUI.Flags[flag].Value
+           if oldState == newState then return end -- No change
+
+           LuminaUI.Flags[flag].Value = newState
+
+           local targetColor = newState and (SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled) or SelectedTheme.ToggleDisabled
+           local targetKnobPos = newState and UDim2.new(1, -2, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
+           local targetKnobAnchor = newState and Vector2.new(1, 0.5) or Vector2.new(0, 0.5)
+
+           local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+           TweenService:Create(ToggleSwitch, tweenInfo, { BackgroundColor3 = targetColor }):Play()
+           TweenService:Create(ToggleKnob, tweenInfo, { Position = targetKnobPos, AnchorPoint = targetKnobAnchor }):Play()
+
+           if triggerCallback then
+               local success, err = pcall(callback, newState)
+               if not success then warn("LuminaUI Toggle Error:", err) end
            end
+        end
 
-           local OptionInteract = Utility.createInstance("TextButton", {
-               Name = "Interact", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = OptionFrame
-           })
+        -- Effects & Callback
+        Utility.Connect(ToggleInteract.MouseEnter, function()
+           TweenService:Create(ToggleFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackgroundHover }):Play()
+           stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
+           if tooltip then Utility.showTooltip(tooltip) end
+        end)
+        Utility.Connect(ToggleInteract.MouseLeave, function()
+           TweenService:Create(ToggleFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackground }):Play()
+           stroke.Color = SelectedTheme.ElementStroke
+           if tooltip then Utility.hideTooltip() end
+        end)
+        Utility.Connect(ToggleInteract.MouseButton1Click, function()
+           setToggleState(not LuminaUI.Flags[flag].Value) -- Toggle state and trigger callback
+        end)
 
-           -- Option Interaction
-           Utility.Connect(OptionInteract.MouseEnter, function()
-               OptionFrame.BackgroundColor3 = SelectedTheme.ElementBackgroundHover
-           end)
-           Utility.Connect(OptionInteract.MouseLeave, function()
-               local currentVal = LuminaUI.Flags[flag].Value
-               local stillSelected
-               if allowMultiSelect then stillSelected = table.find(currentVal, value) else stillSelected = currentVal == value end
-               OptionFrame.BackgroundColor3 = stillSelected and SelectedTheme.DropdownSelected or SelectedTheme.DropdownUnselected
-           end)
-           Utility.Connect(OptionInteract.MouseButton1Click, function()
-               local currentVal = LuminaUI.Flags[flag].Value
-               local newValue
-               if allowMultiSelect then
-                   newValue = {} -- Create a new table for the updated selection
-                   local found = false
-                   for _, existingValue in ipairs(currentVal) do
-                       if existingValue == value then
-                           found = true
+        -- API to update toggle state externally
+        local ToggleAPI = {
+           Instance = ToggleFrame,
+           Type = "Toggle",
+           Flag = flag,
+           SetValue = function(newValue)
+               setToggleState(newValue, false) -- Set value without triggering callback
+           end,
+           GetValue = function()
+               return LuminaUI.Flags[flag].Value
+           end
+        }
+        Tab.Elements[flag] = ToggleAPI -- Store API under flag name
+
+        return ToggleAPI
+        end
+
+        -- CreateSlider (Refactored with Theme Update)
+        function Tab:CreateSlider(options)
+        options = options or {}
+        local sliderName = options.Name or "Slider"
+        local flag = options.Flag -- Mandatory flag name
+        local min = options.Min or 0
+        local max = options.Max or 100
+        local step = options.Step or 1 -- Increment value
+        local defaultValue = options.Default or min
+        local units = options.Units or "" -- e.g., "%", "ms"
+        local callback = options.Callback or function(value) print(sliderName .. " set to " .. value) end
+        local icon = options.Icon
+        local tooltip = options.Tooltip
+
+        if not flag then warn("LuminaUI: Slider '" .. sliderName .. "' requires a 'Flag' option."); return end
+
+        -- Clamp default value and ensure it aligns with step
+        defaultValue = math.clamp(defaultValue, min, max)
+        defaultValue = math.floor((defaultValue - min) / step + 0.5) * step + min -- Snap to nearest step
+
+        local initialValue = registerFlag(flag, defaultValue, "Slider")
+
+        local elementHeight = 50 -- Taller for slider
+        local elementPadding = 10
+        local iconSize = 20
+        local sliderHeight = 6
+        local knobSize = 14
+
+        local updateTheme = function(instance)
+           local sliderTrack = instance:FindFirstChild("SliderTrack")
+           local progress = sliderTrack and sliderTrack:FindFirstChild("Progress")
+           local knob = sliderTrack and sliderTrack:FindFirstChild("Knob")
+           local iconLabel = instance:FindFirstChild("Icon")
+           local label = instance:FindFirstChild("Label")
+           local valueLabel = instance:FindFirstChild("ValueLabel")
+           local stroke = instance:FindFirstChildOfClass("UIStroke")
+
+           instance.BackgroundColor3 = SelectedTheme.ElementBackground
+           if stroke then stroke.Color = SelectedTheme.ElementStroke end
+           if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
+           if label then label.TextColor3 = SelectedTheme.TextColor end
+           if valueLabel then valueLabel.TextColor3 = SelectedTheme.SubTextColor end
+
+           if sliderTrack then sliderTrack.BackgroundColor3 = SelectedTheme.SliderBackground end
+           if progress then progress.BackgroundColor3 = SelectedTheme.AccentColor or SelectedTheme.SliderProgress end
+           if knob then knob.BackgroundColor3 = SelectedTheme.TextColor end -- Knob color usually constant
+        end
+
+        local SliderFrame = Utility.createInstance("Frame", {
+           Name = "Slider_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
+           BackgroundColor3 = SelectedTheme.ElementBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
+        }, "Slider", updateTheme) -- Track Slider
+        Utility.createCorner(SliderFrame, 4)
+        local stroke = Utility.createStroke(SliderFrame, SelectedTheme.ElementStroke, 1)
+
+        local topRowHeight = 20
+        local bottomRowY = topRowHeight + 5
+
+        -- Icon (Top Row)
+        local textXOffset = elementPadding
+        if icon then
+            local SliderIcon = Utility.createInstance("ImageLabel", {
+                Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0, topRowHeight / 2),
+                AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
+                ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = SliderFrame
+            })
+            textXOffset = elementPadding + iconSize + 8
+        end
+
+        -- Label (Top Row)
+        local SliderLabel = Utility.createInstance("TextLabel", {
+           Name = "Label", Size = UDim2.new(0.6, 0, 0, topRowHeight), Position = UDim2.new(0, textXOffset, 0, 0),
+           BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = sliderName, TextColor3 = SelectedTheme.TextColor,
+           TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Center, Parent = SliderFrame
+        })
+
+        -- Value Label (Top Row)
+        local ValueLabel = Utility.createInstance("TextLabel", {
+           Name = "ValueLabel", Size = UDim2.new(0.4, -elementPadding, 0, topRowHeight), Position = UDim2.new(1, -elementPadding, 0, 0),
+           AnchorPoint = Vector2.new(1, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = "", -- Updated later
+           TextColor3 = SelectedTheme.SubTextColor, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Right, TextYAlignment = Enum.TextYAlignment.Center, Parent = SliderFrame
+        })
+
+        -- Slider Track (Bottom Row)
+        local SliderTrack = Utility.createInstance("Frame", {
+           Name = "SliderTrack", Size = UDim2.new(1, -(elementPadding * 2), 0, sliderHeight), Position = UDim2.new(0.5, 0, 0, bottomRowY + sliderHeight / 2),
+           AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = SelectedTheme.SliderBackground, Parent = SliderFrame
+        })
+        Utility.createCorner(SliderTrack, sliderHeight / 2)
+
+        -- Progress Bar
+        local Progress = Utility.createInstance("Frame", {
+           Name = "Progress", Size = UDim2.new(0, 0, 1, 0), -- Width updated later
+           BackgroundColor3 = SelectedTheme.AccentColor or SelectedTheme.SliderProgress, Parent = SliderTrack
+        })
+        Utility.createCorner(Progress, sliderHeight / 2)
+
+        -- Knob
+        local Knob = Utility.createInstance("Frame", {
+           Name = "Knob", Size = UDim2.new(0, knobSize, 0, knobSize), Position = UDim2.new(0, 0, 0.5, 0), -- X updated later
+           AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = SelectedTheme.TextColor, Parent = SliderTrack
+        })
+        Utility.createCorner(Knob, knobSize / 2)
+
+        -- Slider Logic
+        local isDragging = false
+        local function updateSlider(newValue, triggerCallback)
+           triggerCallback = triggerCallback == nil and true or triggerCallback -- Default to true
+
+           -- Clamp and snap to step
+           newValue = math.clamp(newValue, min, max)
+           newValue = math.floor((newValue - min) / step + 0.5) * step + min
+
+           local oldValue = LuminaUI.Flags[flag].Value
+           if oldValue == newValue then return end -- No change
+
+           LuminaUI.Flags[flag].Value = newValue
+
+           -- Update visuals
+           local percent = (newValue - min) / (max - min)
+           if max == min then percent = 0 end -- Avoid division by zero
+
+           Progress.Size = UDim2.new(percent, 0, 1, 0)
+           Knob.Position = UDim2.new(percent, 0, 0.5, 0)
+           ValueLabel.Text = Utility.formatNumber(newValue, step < 1 and 1 or 0) .. units -- Show decimal if step is fractional
+
+           if triggerCallback then
+               local success, err = pcall(callback, newValue)
+               if not success then warn("LuminaUI Slider Error:", err) end
+           end
+        end
+
+        -- Initial update
+        updateSlider(initialValue, false)
+
+        -- Interaction
+        local SliderInteract = Utility.createInstance("TextButton", {
+           Name = "Interact", Size = UDim2.new(1, 0, 0, elementHeight - bottomRowY + knobSize), -- Cover track and knob area
+           Position = UDim2.new(0, 0, 0, bottomRowY - knobSize/2), BackgroundTransparency = 1, Text = "", ZIndex = 2, Parent = SliderFrame
+        })
+
+        local function handleInput(input)
+           local mouseX = input.Position.X
+           local trackStartX = SliderTrack.AbsolutePosition.X
+           local trackWidth = SliderTrack.AbsoluteSize.X
+
+           local relativeX = math.clamp((mouseX - trackStartX) / trackWidth, 0, 1)
+           local newValue = min + relativeX * (max - min)
+           updateSlider(newValue) -- Update and trigger callback
+        end
+
+        Utility.Connect(SliderInteract.InputBegan, function(input)
+           if input.UserInputType == Enum.UserInputType.MouseButton1 then
+               isDragging = true
+               handleInput(input) -- Update on initial click
+               Utility.pulseEffect(Knob, 1.2, 0.1)
+               if tooltip then Utility.showTooltip(tooltip) end
+               -- Prevent text selection while dragging
+               UserInputService.TextSelectionEnabled = false
+           end
+        end)
+
+        Utility.Connect(UserInputService.InputEnded, function(input)
+           if input.UserInputType == Enum.UserInputType.MouseButton1 and isDragging then
+               isDragging = false
+               if tooltip then Utility.hideTooltip() end
+               -- Re-enable text selection
+               UserInputService.TextSelectionEnabled = true
+           end
+        end)
+
+        Utility.Connect(UserInputService.InputChanged, function(input)
+           if input.UserInputType == Enum.UserInputType.MouseMovement and isDragging then
+               handleInput(input)
+           end
+        end)
+
+        -- Hover effect on the main frame
+        Utility.Connect(SliderFrame.MouseEnter, function()
+            stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
+        end)
+        Utility.Connect(SliderFrame.MouseLeave, function()
+            if not isDragging then stroke.Color = SelectedTheme.ElementStroke end
+        end)
+
+        -- API to update slider state externally
+        local SliderAPI = {
+           Instance = SliderFrame,
+           Type = "Slider",
+           Flag = flag,
+           SetValue = function(newValue)
+               updateSlider(newValue, false) -- Set value without triggering callback
+           end,
+           GetValue = function()
+               return LuminaUI.Flags[flag].Value
+           end
+        }
+        Tab.Elements[flag] = SliderAPI -- Store API under flag name
+
+        return SliderAPI
+        end
+
+        -- CreateDropdown (Refactored with Theme Update)
+        function Tab:CreateDropdown(options)
+        options = options or {}
+        local dropdownName = options.Name or "Dropdown"
+        local flag = options.Flag -- Mandatory flag name
+        local values = options.Values or {} -- List of strings
+        local defaultValue = options.Default or (values[1] or "")
+        local allowMultiSelect = options.MultiSelect or false
+        local callback = options.Callback or function(value) print(dropdownName .. " selected: " .. table.concat(value, ", ")) end
+        local icon = options.Icon
+        local tooltip = options.Tooltip
+
+        if not flag then warn("LuminaUI: Dropdown '" .. dropdownName .. "' requires a 'Flag' option."); return end
+        if #values == 0 then warn("LuminaUI: Dropdown '" .. dropdownName .. "' has no values."); return end
+
+        -- Validate default value(s)
+        local initialValue
+        if allowMultiSelect then
+           defaultValue = type(defaultValue) == "table" and defaultValue or {defaultValue}
+           initialValue = {}
+           for _, v in ipairs(defaultValue) do
+               if table.find(values, v) then table.insert(initialValue, v) end
+           end
+           if #initialValue == 0 and #values > 0 then initialValue = {} end -- Default to empty if invalid default provided
+        else
+           if not table.find(values, defaultValue) then defaultValue = values[1] end
+           initialValue = defaultValue
+        end
+
+        local currentValue = registerFlag(flag, initialValue, "Dropdown")
+
+        local elementHeight = 36
+        local elementPadding = 10
+        local iconSize = 20
+        local arrowSize = 12
+        local dropdownOpen = false
+        local dropdownList = nil -- Instance reference
+
+        local updateTheme = function(instance)
+           local arrow = instance:FindFirstChild("Arrow")
+           local iconLabel = instance:FindFirstChild("Icon")
+           local label = instance:FindFirstChild("Label")
+           local valueLabel = instance:FindFirstChild("ValueLabel")
+           local stroke = instance:FindFirstChildOfClass("UIStroke")
+
+           instance.BackgroundColor3 = SelectedTheme.ElementBackground
+           if stroke then stroke.Color = SelectedTheme.ElementStroke end
+           if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
+           if label then label.TextColor3 = SelectedTheme.TextColor end
+           if valueLabel then valueLabel.TextColor3 = SelectedTheme.SubTextColor end
+           if arrow then arrow.ImageColor3 = SelectedTheme.SubTextColor end
+
+           -- Update dropdown list theme if open
+           if dropdownList and dropdownList.Parent then
+               dropdownList.BackgroundColor3 = SelectedTheme.DropdownUnselected
+               local listStroke = dropdownList:FindFirstChildOfClass("UIStroke")
+               if listStroke then listStroke.Color = SelectedTheme.ElementStroke end
+               -- Update individual option themes
+               for _, optionFrame in ipairs(dropdownList.ListFrame:GetChildren()) do
+                   if optionFrame:IsA("Frame") then
+                       local optionLabel = optionFrame:FindFirstChild("Label")
+                       local checkmark = optionFrame:FindFirstChild("Checkmark")
+                       local isSelected = false
+                       if allowMultiSelect then
+                           isSelected = table.find(LuminaUI.Flags[flag].Value, optionLabel.Text)
                        else
-                           table.insert(newValue, existingValue)
+                           isSelected = LuminaUI.Flags[flag].Value == optionLabel.Text
+                       end
+
+                       optionFrame.BackgroundColor3 = isSelected and SelectedTheme.DropdownSelected or SelectedTheme.DropdownUnselected
+                       if optionLabel then optionLabel.TextColor3 = SelectedTheme.TextColor end
+                       if checkmark then
+                           checkmark.ImageColor3 = SelectedTheme.TextColor
+                           checkmark.Visible = isSelected
                        end
                    end
-                   if not found then
-                       table.insert(newValue, value) -- Add if not found
+               end
+           end
+        end
+
+        local DropdownFrame = Utility.createInstance("Frame", {
+           Name = "Dropdown_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
+           BackgroundColor3 = SelectedTheme.ElementBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage,
+           ClipsDescendants = false -- Allow dropdown list to show
+        }, "Dropdown", updateTheme) -- Track Dropdown
+        Utility.createCorner(DropdownFrame, 4)
+        local stroke = Utility.createStroke(DropdownFrame, SelectedTheme.ElementStroke, 1)
+
+        local textXOffset = elementPadding
+        if icon then
+            local DropdownIcon = Utility.createInstance("ImageLabel", {
+                Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
+                AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
+                ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = DropdownFrame
+            })
+            textXOffset = elementPadding + iconSize + 8
+        end
+
+        -- Label
+        local DropdownLabel = Utility.createInstance("TextLabel", {
+           Name = "Label", Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(0, textXOffset, 0, 0),
+           BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = dropdownName, TextColor3 = SelectedTheme.TextColor,
+           TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = DropdownFrame
+        })
+
+        -- Value Label (Shows selected value/count)
+        local ValueLabel = Utility.createInstance("TextLabel", {
+           Name = "ValueLabel", Size = UDim2.new(0.5, -(elementPadding + arrowSize + 5 + elementPadding), 1, 0), Position = UDim2.new(1, -(elementPadding + arrowSize + 5), 0, 0),
+           AnchorPoint = Vector2.new(1, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = "", -- Updated later
+           TextColor3 = SelectedTheme.SubTextColor, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Right, Parent = DropdownFrame
+        })
+
+        -- Arrow Icon
+        local Arrow = Utility.createInstance("ImageLabel", {
+           Name = "Arrow", Size = UDim2.new(0, arrowSize, 0, arrowSize), Position = UDim2.new(1, -elementPadding, 0.5, 0),
+           AnchorPoint = Vector2.new(1, 0.5), BackgroundTransparency = 1, Image = "rbxassetid://6035048680", -- Chevron down
+           ImageColor3 = SelectedTheme.SubTextColor, Rotation = 0, Parent = DropdownFrame
+        })
+
+        -- Interaction Button
+        local DropdownInteract = Utility.createInstance("TextButton", {
+           Name = "Interact", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 1, Parent = DropdownFrame
+        })
+
+        -- Function to update the displayed value text
+        local function updateValueLabel()
+           local currentVal = LuminaUI.Flags[flag].Value
+           if allowMultiSelect then
+               local count = #currentVal
+               ValueLabel.Text = count .. (#values == count and " (All)" or " Selected")
+           else
+               ValueLabel.Text = currentVal
+           end
+        end
+        updateValueLabel() -- Initial update
+
+        -- Function to create/destroy the dropdown list
+        local function toggleDropdownList(forceClose)
+           if dropdownOpen and not forceClose then -- Close it
+               dropdownOpen = false
+               TweenService:Create(Arrow, TweenInfo.new(0.2), { Rotation = 0 }):Play()
+               if dropdownList and dropdownList.Parent then
+                   local listTween = TweenService:Create(dropdownList, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1 })
+                   listTween:Play()
+                   Utility.Connect(listTween.Completed, function()
+                       Utility.destroyInstance(dropdownList)
+                       dropdownList = nil
+                   end)
+               end
+               stroke.Color = SelectedTheme.ElementStroke -- Reset stroke on close
+               if tooltip then Utility.hideTooltip() end -- Hide tooltip when closing
+
+           elseif not dropdownOpen and not forceClose then -- Open it
+               dropdownOpen = true
+               TweenService:Create(Arrow, TweenInfo.new(0.2), { Rotation = 180 }):Play()
+               stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled -- Highlight stroke when open
+
+               local listHeight = math.min(#values * 30 + 10, 160) -- Max height 160px
+               local listYPos = elementHeight + 2
+
+               -- Theme update function for the list itself
+               local updateListTheme = function(instance)
+                   instance.BackgroundColor3 = SelectedTheme.DropdownUnselected
+                   local listStroke = instance:FindFirstChildOfClass("UIStroke")
+                   if listStroke then listStroke.Color = SelectedTheme.ElementStroke end
+                   -- Option updates are handled by the main dropdown updateTheme
+               end
+
+               dropdownList = Utility.createInstance("Frame", {
+                   Name = "DropdownList", Size = UDim2.new(1, 0, 0, 0), -- Start height 0 for animation
+                   Position = UDim2.new(0, 0, 0, listYPos), BackgroundColor3 = SelectedTheme.DropdownUnselected,
+                   BackgroundTransparency = 1, BorderSizePixel = 0, ClipsDescendants = true, ZIndex = 100, Parent = DropdownFrame
+               }, "DropdownListContainer", updateListTheme) -- Track list container
+               Utility.createCorner(dropdownList, 4)
+               Utility.createStroke(dropdownList, SelectedTheme.ElementStroke, 1)
+
+               local listScroll = Utility.createInstance("ScrollingFrame", {
+                   Name = "ListFrame", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0,
+                   CanvasSize = UDim2.new(0, 0, 0, #values * 30), ScrollBarThickness = 4, Parent = dropdownList
+               })
+               Utility.applyCustomScrollbar(listScroll, 4) -- Apply thin scrollbar
+
+               local listLayout = Utility.createInstance("UIListLayout", {
+                   Padding = UDim.new(0, 0), SortOrder = Enum.SortOrder.LayoutOrder, Parent = listScroll
+               })
+               local listPadding = Utility.createInstance("UIPadding", {
+                   PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5),
+                   PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5), Parent = listScroll
+               })
+
+               -- Create options
+               for i, value in ipairs(values) do
+                   local isSelected
+                   if allowMultiSelect then
+                       isSelected = table.find(LuminaUI.Flags[flag].Value, value)
+                   else
+                       isSelected = LuminaUI.Flags[flag].Value == value
                    end
-                   table.sort(newValue) -- Keep it sorted (optional)
-               else
-                   newValue = value
+
+                   local OptionFrame = Utility.createInstance("Frame", {
+                       Name = "Option_" .. value:gsub("%s+", "_"), Size = UDim2.new(1, 0, 0, 30),
+                       BackgroundColor3 = isSelected and SelectedTheme.DropdownSelected or SelectedTheme.DropdownUnselected,
+                       LayoutOrder = i, Parent = listScroll
+                   })
+                   Utility.createCorner(OptionFrame, 3)
+
+                   local OptionLabel = Utility.createInstance("TextLabel", {
+                       Name = "Label", Size = UDim2.new(1, -30, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+                       BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = value, TextColor3 = SelectedTheme.TextColor,
+                       TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = OptionFrame
+                   })
+
+                   local Checkmark = nil
+                   if allowMultiSelect then
+                       Checkmark = Utility.createInstance("ImageLabel", {
+                           Name = "Checkmark", Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -15, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5),
+                           BackgroundTransparency = 1, Image = "rbxassetid://6031280882", -- Checkmark/Settings icon placeholder
+                           ImageColor3 = SelectedTheme.TextColor, Visible = isSelected, Parent = OptionFrame
+                       })
+                   end
+
+                   local OptionInteract = Utility.createInstance("TextButton", {
+                       Name = "Interact", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = OptionFrame
+                   })
+
+                   -- Option Interaction
+                   Utility.Connect(OptionInteract.MouseEnter, function()
+                       OptionFrame.BackgroundColor3 = SelectedTheme.ElementBackgroundHover
+                   end)
+                   Utility.Connect(OptionInteract.MouseLeave, function()
+                       local currentVal = LuminaUI.Flags[flag].Value
+                       local stillSelected
+                       if allowMultiSelect then stillSelected = table.find(currentVal, value) else stillSelected = currentVal == value end
+                       OptionFrame.BackgroundColor3 = stillSelected and SelectedTheme.DropdownSelected or SelectedTheme.DropdownUnselected
+                   end)
+                   Utility.Connect(OptionInteract.MouseButton1Click, function()
+                       local currentVal = LuminaUI.Flags[flag].Value
+                       local newValue
+                       if allowMultiSelect then
+                           newValue = {} -- Create a new table for the updated selection
+                           local found = false
+                           for _, existingValue in ipairs(currentVal) do
+                               if existingValue == value then
+                                   found = true
+                               else
+                                   table.insert(newValue, existingValue)
+                               end
+                           end
+                           if not found then
+                               table.insert(newValue, value) -- Add if not found
+                           end
+                           table.sort(newValue) -- Keep it sorted (optional)
+                       else
+                           newValue = value
+                       end
+
+                       -- Update flag and visuals
+                       LuminaUI.Flags[flag].Value = newValue
+                       updateValueLabel()
+                       updateTheme(DropdownFrame) -- Update all visuals including options
+
+                       -- Trigger callback
+                       local success, err = pcall(callback, newValue)
+                       if not success then warn("LuminaUI Dropdown Error:", err) end
+
+                       -- Close dropdown if not multi-select
+                       if not allowMultiSelect then
+                           toggleDropdownList()
+                       end
+                   end)
                end
 
-               -- Update flag and visuals
-               LuminaUI.Flags[flag].Value = newValue
-               updateValueLabel()
-               updateTheme(DropdownFrame) -- Update all visuals including options
-
-               -- Trigger callback
-               local success, err = pcall(callback, newValue)
-               if not success then warn("LuminaUI Dropdown Error:", err) end
-
-               -- Close dropdown if not multi-select
-               if not allowMultiSelect then
-                   toggleDropdownList()
-               end
-           end)
-       end
-
-       -- Animate list open
-       local listTween = TweenService:Create(dropdownList, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 0, listHeight), BackgroundTransparency = 0 })
-       listTween:Play()
-   end
-end
-
--- Effects & Callback for main dropdown button
-Utility.Connect(DropdownInteract.MouseEnter, function()
-   if not dropdownOpen then
-       TweenService:Create(DropdownFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackgroundHover }):Play()
-       stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
-   end
-   if tooltip then Utility.showTooltip(tooltip) end
-end)
-Utility.Connect(DropdownInteract.MouseLeave, function()
-   if not dropdownOpen then
-       TweenService:Create(DropdownFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackground }):Play()
-       stroke.Color = SelectedTheme.ElementStroke
-   end
-    if tooltip then Utility.hideTooltip() end
-end)
-Utility.Connect(DropdownInteract.MouseButton1Click, function()
-   toggleDropdownList()
-end)
-
--- Close dropdown if clicked outside
-local function checkClickOutside(input)
-   if not dropdownOpen or not dropdownList or not dropdownList.Parent then return end
-
-   local mousePos = input.Position
-   local framePos = DropdownFrame.AbsolutePosition
-   local frameSize = DropdownFrame.AbsoluteSize
-   local listPos = dropdownList.AbsolutePosition
-   local listSize = dropdownList.AbsoluteSize
-
-   -- Check if click is outside both the main frame and the list
-   local inFrame = mousePos.X >= framePos.X and mousePos.X <= framePos.X + frameSize.X and mousePos.Y >= framePos.Y and mousePos.Y <= framePos.Y + frameSize.Y
-   local inList = mousePos.X >= listPos.X and mousePos.X <= listPos.X + listSize.X and mousePos.Y >= listPos.Y and mousePos.Y <= listPos.Y + listSize.Y
-
-   if not inFrame and not inList then
-       toggleDropdownList(true) -- Force close
-   end
-end
--- Use InputBegan on UserInputService for more reliable outside click detection
-local clickOutsideConnection = Utility.Connect(UserInputService.InputBegan, function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        checkClickOutside(input)
-    end
-end)
--- Disconnect this listener when the dropdown is destroyed (handled by Utility.destroyInstance)
-Utility.storeConnection(DropdownFrame, clickOutsideConnection)
-
-
--- API to update dropdown state externally
-local DropdownAPI = {
-   Instance = DropdownFrame,
-   Type = "Dropdown",
-   Flag = flag,
-   SetValue = function(newValue)
-       -- Validate input based on multi-select
-       local validValue
-       if allowMultiSelect then
-           validValue = {}
-           newValue = type(newValue) == "table" and newValue or {newValue}
-           for _, v in ipairs(newValue) do
-               if table.find(values, v) then table.insert(validValue, v) end
+               -- Animate list open
+               local listTween = TweenService:Create(dropdownList, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 0, listHeight), BackgroundTransparency = 0 })
+               listTween:Play()
            end
-           table.sort(validValue)
-       else
-           if table.find(values, newValue) then
-               validValue = newValue
-           else
-               warn("LuminaUI: Invalid value '"..tostring(newValue).."' for Dropdown '"..flag.."'. Setting to default.")
-               validValue = values[1] -- Set to first option if invalid
-           end
-       end
-
-       LuminaUI.Flags[flag].Value = validValue
-       updateValueLabel()
-       updateTheme(DropdownFrame) -- Update visuals
-   end,
-   GetValue = function()
-       return LuminaUI.Flags[flag].Value
-   end,
-   SetValues = function(newValues) -- Function to update the list of options
-       if type(newValues) ~= "table" then warn("LuminaUI: SetValues requires a table."); return end
-       values = newValues
-       -- Reset selection to default or first item if current selection is no longer valid
-       local currentSelection = LuminaUI.Flags[flag].Value
-       local newSelection
-       if allowMultiSelect then
-           newSelection = {}
-           for _, v in ipairs(currentSelection) do
-               if table.find(values, v) then table.insert(newSelection, v) end
-           end
-           table.sort(newSelection)
-       else
-           if not table.find(values, currentSelection) then
-               newSelection = #values > 0 and values[1] or ""
-           else
-               newSelection = currentSelection
-           end
-       end
-       LuminaUI.Flags[flag].Value = newSelection
-       updateValueLabel()
-       -- Rebuild dropdown if open
-       if dropdownOpen then
-           toggleDropdownList(true) -- Close first
-           -- Optionally reopen immediately? toggleDropdownList()
-       end
-       updateTheme(DropdownFrame) -- Update visuals
-   end
-}
-Tab.Elements[flag] = DropdownAPI -- Store API under flag name
-
-return DropdownAPI
-end
-
--- CreateTextbox (Refactored with Theme Update)
-function Tab:CreateTextbox(options)
-options = options or {}
-local textboxName = options.Name or "Textbox"
-local flag = options.Flag -- Mandatory flag name
-local defaultValue = options.Default or ""
-local placeholder = options.Placeholder or "Enter text..."
-local clearOnFocus = options.ClearOnFocus or false -- Whether to clear placeholder on focus
-local numeric = options.Numeric or false -- Only allow numbers (and optionally '.')
-local maxLength = options.MaxLength or 100 -- Max input length
-local callback = options.Callback or function(value) print(textboxName .. " text: " .. value) end
-local finishedCallback = options.FinishedCallback or callback -- Called on FocusLost
-local icon = options.Icon
-local tooltip = options.Tooltip
-
-if not flag then warn("LuminaUI: Textbox '" .. textboxName .. "' requires a 'Flag' option."); return end
-
-local initialValue = registerFlag(flag, defaultValue, "Textbox")
-
-local elementHeight = 36
-local elementPadding = 10
-local iconSize = 20
-
-local updateTheme = function(instance)
-   local textbox = instance:FindFirstChild("Input")
-   local iconLabel = instance:FindFirstChild("Icon")
-   local stroke = instance:FindFirstChildOfClass("UIStroke")
-
-   instance.BackgroundColor3 = SelectedTheme.InputBackground
-   if stroke then stroke.Color = SelectedTheme.InputStroke end
-   if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
-
-   if textbox then
-       textbox.TextColor3 = SelectedTheme.TextColor
-       textbox.PlaceholderColor3 = SelectedTheme.InputPlaceholder
-       -- Re-apply placeholder if needed (tricky, might need state tracking)
-   end
-end
-
-local TextboxFrame = Utility.createInstance("Frame", {
-   Name = "Textbox_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
-   BackgroundColor3 = SelectedTheme.InputBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
-}, "Textbox", updateTheme) -- Track Textbox
-Utility.createCorner(TextboxFrame, 4)
-local stroke = Utility.createStroke(TextboxFrame, SelectedTheme.InputStroke, 1)
-
-local textXOffset = elementPadding
-if icon then
-    local TextboxIcon = Utility.createInstance("ImageLabel", {
-        Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
-        ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = TextboxFrame
-    })
-    textXOffset = elementPadding + iconSize + 8
-end
-
-local InputBox = Utility.createInstance("TextBox", {
-   Name = "Input", Size = UDim2.new(1, -(textXOffset + elementPadding), 1, -6), -- Padding top/bottom
-   Position = UDim2.new(0, textXOffset, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
-   BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = initialValue, TextColor3 = SelectedTheme.TextColor,
-   TextSize = 13, PlaceholderText = placeholder, PlaceholderColor3 = SelectedTheme.InputPlaceholder,
-   ClearTextOnFocus = clearOnFocus, TextXAlignment = Enum.TextXAlignment.Left, MultiLine = false,
-   Parent = TextboxFrame
-})
-
--- Numeric filtering
-if numeric then
-   Utility.Connect(InputBox:GetPropertyChangedSignal("Text"), function()
-       local text = InputBox.Text
-       local filtered = text:gsub("[^%d%.%-]", "") -- Allow digits, period, minus
-       -- Ensure only one decimal point and minus at the start
-       local minusCount = 0
-       local decimalCount = 0
-       local finalFiltered = ""
-       for i = 1, #filtered do
-           local char = filtered:sub(i, i)
-           if char == "-" then
-               if i == 1 and minusCount == 0 then
-                   finalFiltered = finalFiltered .. char
-                   minusCount = minusCount + 1
-               end
-           elseif char == "." then
-               if decimalCount == 0 then
-                   finalFiltered = finalFiltered .. char
-                   decimalCount = decimalCount + 1
-               end
-           else
-               finalFiltered = finalFiltered .. char
-           end
-       end
-
-       if InputBox.Text ~= finalFiltered then
-           InputBox.Text = finalFiltered
-       end
-   end)
-end
-
--- Max length handling (simple truncation)
-if maxLength > 0 then
-    Utility.Connect(InputBox:GetPropertyChangedSignal("Text"), function()
-       if string.len(InputBox.Text) > maxLength then
-           InputBox.Text = string.sub(InputBox.Text, 1, maxLength)
-       end
-   end)
-end
-
--- Callbacks
-Utility.Connect(InputBox:GetPropertyChangedSignal("Text"), function()
-   local newValue = InputBox.Text
-   if numeric and newValue ~= "" and newValue ~= "-" and newValue ~= "." and newValue ~= "-." then
-       newValue = tonumber(newValue) or 0 -- Convert to number if possible
-   end
-   if LuminaUI.Flags[flag].Value ~= newValue then
-       LuminaUI.Flags[flag].Value = newValue
-       local success, err = pcall(callback, newValue)
-       if not success then warn("LuminaUI Textbox Error:", err) end
-   end
-end)
-
-Utility.Connect(InputBox.FocusLost, function(enterPressed)
-   if enterPressed then
-       local newValue = InputBox.Text
-       if numeric and newValue ~= "" and newValue ~= "-" and newValue ~= "." and newValue ~= "-." then
-           newValue = tonumber(newValue) or 0
-       end
-       -- Ensure flag is updated before calling finishedCallback
-       if LuminaUI.Flags[flag].Value ~= newValue then
-            LuminaUI.Flags[flag].Value = newValue
-            -- Call regular callback too if value changed on focus lost
-            local cb_success, cb_err = pcall(callback, newValue)
-            if not cb_success then warn("LuminaUI Textbox Error:", cb_err) end
-       end
-       -- Call finished callback
-       local success, err = pcall(finishedCallback, newValue)
-       if not success then warn("LuminaUI Textbox Finish Error:", err) end
-   end
-   -- Reset placeholder if needed and box is empty
-   if InputBox.Text == "" then
-       InputBox.ClearTextOnFocus = clearOnFocus -- Reset property just in case
-   end
-   stroke.Color = SelectedTheme.InputStroke -- Reset stroke color
-   if tooltip then Utility.hideTooltip() end
-end)
-
-Utility.Connect(InputBox.Focused, function()
-   stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled -- Highlight on focus
-   if tooltip then Utility.showTooltip(tooltip) end
-end)
-
--- API to update textbox state externally
-local TextboxAPI = {
-   Instance = TextboxFrame,
-   Type = "Textbox",
-   Flag = flag,
-   SetValue = function(newValue)
-       InputBox.Text = tostring(newValue) -- Update TextBox text
-       -- Flag will be updated by the TextChanged signal
-   end,
-   GetValue = function()
-       return LuminaUI.Flags[flag].Value
-   end,
-   Focus = function() InputBox:CaptureFocus() end,
-   Unfocus = function() InputBox:ReleaseFocus() end
-}
-Tab.Elements[flag] = TextboxAPI -- Store API under flag name
-
-return TextboxAPI
-end
-
--- CreateLabel (Refactored with Theme Update)
-function Tab:CreateLabel(options)
-options = options or {}
-local text = options.Name or "Label Text" -- Use Name as text if Text not provided
-text = options.Text or text
-local size = options.Size or 13
-local alignment = options.Alignment or Enum.TextXAlignment.Left
-local wrap = options.Wrap or false
-local icon = options.Icon
-
-local elementPadding = 10
-local iconSize = 16 -- Smaller icon for labels usually
-
-local updateTheme = function(instance)
-   local iconLabel = instance:FindFirstChild("Icon")
-   local textLabel = instance:FindFirstChild("Text")
-   if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
-   if textLabel then textLabel.TextColor3 = SelectedTheme.TextColor end
-end
-
--- Calculate required height if wrapping
-local textBounds = Utility.getTextBounds(text, Enum.Font.Gotham, size, ElementsContainer.AbsoluteSize.X - (ElementsPadding.PaddingLeft.Offset + ElementsPadding.PaddingRight.Offset) - (icon and (iconSize + 8) or 0) - (elementPadding * 2))
-local elementHeight = wrap and math.max(20, textBounds.Y + 10) or 20 -- Min height 20
-
-local LabelFrame = Utility.createInstance("Frame", {
-   Name = "Label_" .. text:gsub("%s+", "_"):sub(1, 20), -- Create somewhat unique name
-   Size = UDim2.new(1, 0, 0, elementHeight), BackgroundTransparency = 1,
-   LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
-}, "Label", updateTheme) -- Track Label
-
-local textXOffset = elementPadding
-if icon then
-    local LabelIcon = Utility.createInstance("ImageLabel", {
-        Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
-        ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = LabelFrame
-    })
-    textXOffset = elementPadding + iconSize + 8
-end
-
-local Text = Utility.createInstance("TextLabel", {
-   Name = "Text", Size = UDim2.new(1, -(textXOffset + elementPadding), 1, 0), Position = UDim2.new(0, textXOffset, 0, 0),
-   BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = text, TextColor3 = SelectedTheme.TextColor,
-   TextSize = size, TextWrapped = wrap, TextXAlignment = alignment, TextYAlignment = Enum.TextYAlignment.Center, Parent = LabelFrame
-})
-
--- API for label
-local LabelAPI = {
-   Instance = LabelFrame,
-   Type = "Label",
-   SetText = function(newText)
-       Text.Text = newText
-       -- Recalculate height if wrapping enabled
-       if wrap then
-           local newBounds = Utility.getTextBounds(newText, Text.Font, Text.TextSize, ElementsContainer.AbsoluteSize.X - (ElementsPadding.PaddingLeft.Offset + ElementsPadding.PaddingRight.Offset) - (icon and (iconSize + 8) or 0) - (elementPadding * 2))
-           LabelFrame.Size = UDim2.new(1, 0, 0, math.max(20, newBounds.Y + 10))
-       end
-   end,
-   SetIcon = function(newIconId)
-        local iconLabel = LabelFrame:FindFirstChild("Icon")
-        if newIconId then
-            if iconLabel then
-                iconLabel.Image = Utility.loadIcon(newIconId)
-            else
-                -- Create icon if it didn't exist
-                iconLabel = Utility.createInstance("ImageLabel", {
-                    Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
-                    AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(newIconId),
-                    ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = LabelFrame
-                })
-                textXOffset = elementPadding + iconSize + 8
-                Text.Position = UDim2.new(0, textXOffset, 0, 0)
-                Text.Size = UDim2.new(1, -(textXOffset + elementPadding), 1, 0)
-            end
-        elseif iconLabel then
-            -- Remove icon if newIconId is nil/false
-            Utility.destroyInstance(iconLabel)
-            textXOffset = elementPadding
-            Text.Position = UDim2.new(0, textXOffset, 0, 0)
-            Text.Size = UDim2.new(1, -(textXOffset + elementPadding), 1, 0)
         end
-   end
-}
-Tab.Elements["Label_" .. text:gsub("%s+", "_"):sub(1, 20)] = LabelAPI -- Store API
 
-return LabelAPI
-end
-
--- CreateDivider (Refactored with Theme Update)
-function Tab:CreateDivider(options)
-options = options or {}
-local thickness = options.Thickness or 1
-local color = options.Color -- Optional override
-local padding = options.Padding or 5 -- Vertical padding
-
-local updateTheme = function(instance)
-   instance.BackgroundColor3 = color or SelectedTheme.ElementStroke
-   instance.BackgroundTransparency = color and 0 or 0.8 -- Make default less prominent
-end
-
-local DividerFrame = Utility.createInstance("Frame", {
-   Name = "Divider", Size = UDim2.new(1, 0, 0, thickness), BackgroundColor3 = color or SelectedTheme.ElementStroke,
-   BackgroundTransparency = color and 0 or 0.8, BorderSizePixel = 0, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
-}, "Divider", updateTheme) -- Track Divider
-
--- Add padding using margins (simpler than extra frames)
-DividerFrame.LayoutMargin = UDim.new(0, padding) -- Apply vertical margin
-
--- API for divider
-local DividerAPI = {
-   Instance = DividerFrame,
-   Type = "Divider",
-   SetColor = function(newColor)
-       color = newColor -- Store override
-       DividerFrame.BackgroundColor3 = newColor
-       DividerFrame.BackgroundTransparency = 0
-   end,
-   SetThickness = function(newThickness)
-       DividerFrame.Size = UDim2.new(1, 0, 0, newThickness)
-   end
-}
-Tab.Elements["Divider_" .. #TabPage:GetChildren()] = DividerAPI -- Store API
-
-return DividerAPI
-end
-
--- CreateKeybind (Refactored with Theme Update and Key System Integration)
-function Tab:CreateKeybind(options)
-options = options or {}
-local keybindName = options.Name or "Keybind"
-local flag = options.Flag -- Mandatory flag name
-local defaultKey = options.Default or Enum.KeyCode.None -- Default key
-local defaultModifiers = options.Modifiers or { Shift = false, Ctrl = false, Alt = false }
-local callback = options.Callback or function() print(keybindName .. " triggered") end
-local allowMouse = options.AllowMouse or false -- Allow mouse buttons?
-local tooltip = options.Tooltip
-
-if not flag then warn("LuminaUI: Keybind '" .. keybindName .. "' requires a 'Flag' option."); return end
-if not settings.KeySystem or not settings.KeySystem.Enabled then warn("LuminaUI: Key System disabled, Keybind element will not function."); return end
-
--- Register flag with default key data structure
-local initialValue = registerFlag(flag, { Key = defaultKey, Modifiers = defaultModifiers }, "Keybind")
-
-local elementHeight = 36
-local elementPadding = 10
-local keyWidth = 100
-local listening = false -- Is this keybind currently waiting for input?
-
-local updateTheme = function(instance)
-   local keyButton = instance:FindFirstChild("KeyButton")
-   local label = instance:FindFirstChild("Label")
-   local stroke = instance:FindFirstChildOfClass("UIStroke")
-
-   instance.BackgroundColor3 = SelectedTheme.ElementBackground
-   if stroke then stroke.Color = SelectedTheme.ElementStroke end
-   if label then label.TextColor3 = SelectedTheme.TextColor end
-
-   if keyButton then
-       keyButton.BackgroundColor3 = SelectedTheme.InputBackground
-       local keyStroke = keyButton:FindFirstChildOfClass("UIStroke")
-       if keyStroke then keyStroke.Color = SelectedTheme.InputStroke end
-       local keyLabel = keyButton:FindFirstChild("KeyLabel")
-       if keyLabel then keyLabel.TextColor3 = SelectedTheme.TextColor end
-   end
-end
-
-local KeybindFrame = Utility.createInstance("Frame", {
-   Name = "Keybind_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
-   BackgroundColor3 = SelectedTheme.ElementBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
-}, "Keybind", updateTheme) -- Track Keybind
-Utility.createCorner(KeybindFrame, 4)
-local stroke = Utility.createStroke(KeybindFrame, SelectedTheme.ElementStroke, 1)
-
--- Label
-local KeybindLabel = Utility.createInstance("TextLabel", {
-   Name = "Label", Size = UDim2.new(1, -(elementPadding * 2 + keyWidth), 1, 0), Position = UDim2.new(0, elementPadding, 0, 0),
-   BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = keybindName, TextColor3 = SelectedTheme.TextColor,
-   TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = KeybindFrame
-})
-
--- Key Button
-local KeyButton = Utility.createInstance("TextButton", {
-   Name = "KeyButton", Size = UDim2.new(0, keyWidth, 1, -10), Position = UDim2.new(1, -elementPadding, 0.5, 0),
-   AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = SelectedTheme.InputBackground, Font = Enum.Font.GothamBold,
-   Text = "", TextColor3 = SelectedTheme.TextColor, TextSize = 12, ZIndex = 1, Parent = KeybindFrame
-})
-Utility.createCorner(KeyButton, 4)
-local keyStroke = Utility.createStroke(KeyButton, SelectedTheme.InputStroke, 1)
-local KeyLabel = KeyButton -- Use TextButton directly for text
-
--- Function to format key display text
-local function formatKeyText(keyData)
-   if listening then return "..." end
-   if not keyData or keyData.Key == Enum.KeyCode.None then return "None" end
-
-   local text = ""
-   if keyData.Modifiers.Ctrl then text = text .. "Ctrl + " end
-   if keyData.Modifiers.Alt then text = text .. "Alt + " end
-   if keyData.Modifiers.Shift then text = text .. "Shift + " end
-
-   local keyName = keyData.Key.Name
-   -- Simple replacements for common mouse buttons if allowed
-   if allowMouse then
-       if keyData.Key == Enum.UserInputType.MouseButton1 then keyName = "MB1"
-       elseif keyData.Key == Enum.UserInputType.MouseButton2 then keyName = "MB2"
-       elseif keyData.Key == Enum.UserInputType.MouseButton3 then keyName = "MB3" end
-   end
-   text = text .. keyName
-
-   return text
-end
-
--- Function to register/unregister the actual keybind listener
-local function updateKeyListener()
-   local keyData = LuminaUI.Flags[flag].Value
-   local keybindId = "LuminaKeybind_" .. flag
-
-   -- Remove existing listener for this flag
-   if LuminaUI._Keybinds[keybindId] then
-       LuminaUI._Keybinds[keybindId] = nil
-   end
-
-   -- Add new listener if key is set
-   if keyData and keyData.Key ~= Enum.KeyCode.None then
-       LuminaUI._Keybinds[keybindId] = {
-           Key = keyData.Key,
-           Modifiers = keyData.Modifiers,
-           Callback = callback,
-           SourceInstance = KeybindFrame -- Reference to UI element
-       }
-   end
-end
-
--- Initial setup
-KeyLabel.Text = formatKeyText(initialValue)
-updateKeyListener()
-
--- Input Listening Logic
-local inputConnection = nil
-local function stopListening(newKeyData)
-   if not listening then return end
-   listening = false
-   if inputConnection then inputConnection:Disconnect(); inputConnection = nil end
-
-   -- Restore focus behavior? Maybe not needed for keybinds.
-
-   if newKeyData then
-       -- Validate (e.g., don't allow modifier keys alone?)
-       if newKeyData.Key == Enum.KeyCode.LeftShift or newKeyData.Key == Enum.KeyCode.RightShift or
-          newKeyData.Key == Enum.KeyCode.LeftControl or newKeyData.Key == Enum.KeyCode.RightControl or
-          newKeyData.Key == Enum.KeyCode.LeftAlt or newKeyData.Key == Enum.KeyCode.RightAlt then
-           warn("LuminaUI: Modifier keys cannot be assigned alone.")
-           KeyLabel.Text = formatKeyText(LuminaUI.Flags[flag].Value) -- Revert text
-       else
-           LuminaUI.Flags[flag].Value = newKeyData
-           KeyLabel.Text = formatKeyText(newKeyData)
-           updateKeyListener() -- Update the actual listener
-       end
-   else
-       -- Clicked outside or Esc pressed, revert text
-       KeyLabel.Text = formatKeyText(LuminaUI.Flags[flag].Value)
-   end
-
-   -- Reset visual state
-   keyStroke.Color = SelectedTheme.InputStroke
-   KeyLabel.TextColor3 = SelectedTheme.TextColor
-   if tooltip then Utility.hideTooltip() end
-end
-
-Utility.Connect(KeyButton.MouseButton1Click, function()
-   if listening then return end -- Already listening
-   listening = true
-   KeyLabel.Text = "..."
-   keyStroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
-   KeyLabel.TextColor3 = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
-   if tooltip then Utility.showTooltip("Press any key or Esc to cancel...") end
-
-   -- Start listening for the next input
-   inputConnection = Utility.Connect(UserInputService.InputBegan, function(input, gameProcessed)
-       if gameProcessed then return end -- Ignore game processed input
-
-       local inputType = input.UserInputType
-       local keyCode = input.KeyCode
-
-       -- Check if it's an allowed key type
-       if inputType == Enum.UserInputType.Keyboard or (allowMouse and (inputType == Enum.UserInputType.MouseButton1 or inputType == Enum.UserInputType.MouseButton2 or inputType == Enum.UserInputType.MouseButton3)) then
-           -- Escape key cancels
-           if keyCode == Enum.KeyCode.Escape then
-               stopListening(nil)
-               return
+        -- Effects & Callback for main dropdown button
+        Utility.Connect(DropdownInteract.MouseEnter, function()
+           if not dropdownOpen then
+               TweenService:Create(DropdownFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackgroundHover }):Play()
+               stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
            end
-
-           -- Capture key and modifiers
-           local modifiers = {
-               Shift = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift),
-               Ctrl = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl),
-               Alt = UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) or UserInputService:IsKeyDown(Enum.KeyCode.RightAlt)
-           }
-           -- Use UserInputType for mouse buttons, KeyCode for keyboard
-           local capturedKey = inputType == Enum.UserInputType.Keyboard and keyCode or inputType
-
-           stopListening({ Key = capturedKey, Modifiers = modifiers })
-       end
-   end)
-end)
-
--- Stop listening if clicked outside the button
-local clickOutsideKeyListener = Utility.Connect(UserInputService.InputBegan, function(input)
-    if listening and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-        -- Check if the click was on the KeyButton itself
-        local mousePos = input.Position
-        local buttonPos = KeyButton.AbsolutePosition
-        local buttonSize = KeyButton.AbsoluteSize
-        if not (mousePos.X >= buttonPos.X and mousePos.X <= buttonPos.X + buttonSize.X and mousePos.Y >= buttonPos.Y and mousePos.Y <= buttonPos.Y + buttonSize.Y) then
-            stopListening(nil) -- Clicked outside, cancel
-        end
-    end
-end)
-Utility.storeConnection(KeybindFrame, clickOutsideKeyListener)
-
--- API to update keybind state externally
-local KeybindAPI = {
-   Instance = KeybindFrame,
-   Type = "Keybind",
-   Flag = flag,
-   SetValue = function(newKeyData) -- Expects { Key = Enum.KeyCode/UserInputType, Modifiers = { Shift=bool, Ctrl=bool, Alt=bool } }
-       if type(newKeyData) == "table" and newKeyData.Key and newKeyData.Modifiers then
-            -- Basic validation
-            if (type(newKeyData.Key) == "EnumItem" and newKeyData.Key.EnumType == Enum.KeyCode) or
-               (allowMouse and type(newKeyData.Key) == "EnumItem" and newKeyData.Key.EnumType == Enum.UserInputType) then
-
-                LuminaUI.Flags[flag].Value = newKeyData
-                KeyLabel.Text = formatKeyText(newKeyData)
-                updateKeyListener()
-            else
-                warn("LuminaUI: Invalid key data provided for SetValue on Keybind '"..flag.."'")
-            end
-       else
-            warn("LuminaUI: Invalid format for SetValue on Keybind '"..flag.."'")
-       end
-   end,
-   GetValue = function()
-       return LuminaUI.Flags[flag].Value
-   end,
-   Trigger = function() -- Manually trigger the callback
-       callback()
-   end
-}
-Tab.Elements[flag] = KeybindAPI -- Store API under flag name
-
-return KeybindAPI
-end
-
--- CreateColorPicker (Refactored with Theme Update)
-function Tab:CreateColorPicker(options)
-options = options or {}
-local pickerName = options.Name or "Color Picker"
-local flag = options.Flag -- Mandatory flag name
-local defaultValue = options.Default or Color3.fromRGB(255, 255, 255)
-local callback = options.Callback or function(value) print(pickerName .. " color: " .. tostring(value)) end
-local icon = options.Icon
-local tooltip = options.Tooltip
-
-if not flag then warn("LuminaUI: ColorPicker '" .. pickerName .. "' requires a 'Flag' option."); return end
-if typeof(defaultValue) ~= "Color3" then warn("LuminaUI: Default value for ColorPicker '" .. flag .. "' must be a Color3."); defaultValue = Color3.new(1,1,1) end
-
-local initialValue = registerFlag(flag, defaultValue, "ColorPicker")
-
-local elementHeight = 36
-local elementPadding = 10
-local iconSize = 20
-local swatchSize = 24
-local pickerOpen = false
-local pickerFrame = nil -- Instance reference
-
-local updateTheme = function(instance)
-   local swatch = instance:FindFirstChild("ColorSwatch")
-   local iconLabel = instance:FindFirstChild("Icon")
-   local label = instance:FindFirstChild("Label")
-   local stroke = instance:FindFirstChildOfClass("UIStroke")
-
-   instance.BackgroundColor3 = SelectedTheme.ElementBackground
-   if stroke then stroke.Color = SelectedTheme.ElementStroke end
-   if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
-   if label then label.TextColor3 = SelectedTheme.TextColor end
-
-   if swatch then
-       -- Swatch color is the actual value, no theme update needed unless adding border?
-       local swatchStroke = swatch:FindFirstChildOfClass("UIStroke")
-       if swatchStroke then swatchStroke.Color = SelectedTheme.ElementStroke end
-   end
-
-   -- Update picker frame theme if open
-   if pickerFrame and pickerFrame.Parent then
-       pickerFrame.BackgroundColor3 = SelectedTheme.ColorPickerBackground
-       local pickerStroke = pickerFrame:FindFirstChildOfClass("UIStroke")
-       if pickerStroke then pickerStroke.Color = SelectedTheme.ElementStroke end
-       -- Update internal elements (saturation/value box, hue slider, etc.)
-       local svBox = pickerFrame:FindFirstChild("SV_Box")
-       if svBox then
-           -- Update gradient? Tricky. Maybe just border/cursor.
-           local svCursor = svBox:FindFirstChild("Cursor")
-           if svCursor then svCursor.BackgroundColor3 = SelectedTheme.TextColor end
-       end
-       local hueSlider = pickerFrame:FindFirstChild("Hue_Slider")
-       if hueSlider then
-           -- Update gradient? Tricky. Maybe just border/cursor.
-           local hueCursor = hueSlider:FindFirstChild("Cursor")
-           if hueCursor then hueCursor.BackgroundColor3 = SelectedTheme.TextColor end
-       end
-   end
-end
-
-local PickerFrame = Utility.createInstance("Frame", {
-   Name = "ColorPicker_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
-   BackgroundColor3 = SelectedTheme.ElementBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage,
-   ClipsDescendants = false -- Allow picker popup
-}, "ColorPicker", updateTheme) -- Track ColorPicker
-Utility.createCorner(PickerFrame, 4)
-local stroke = Utility.createStroke(PickerFrame, SelectedTheme.ElementStroke, 1)
-
-local textXOffset = elementPadding
-if icon then
-    local PickerIcon = Utility.createInstance("ImageLabel", {
-        Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
-        ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = PickerFrame
-    })
-    textXOffset = elementPadding + iconSize + 8
-end
-
--- Label
-local PickerLabel = Utility.createInstance("TextLabel", {
-   Name = "Label", Size = UDim2.new(1, -(textXOffset + elementPadding + swatchSize + 10), 1, 0), -- Adjust width for swatch
-   Position = UDim2.new(0, textXOffset, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
-   Text = pickerName, TextColor3 = SelectedTheme.TextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = PickerFrame
-})
-
--- Color Swatch Button
-local ColorSwatch = Utility.createInstance("TextButton", { -- Use TextButton for interaction
-   Name = "ColorSwatch", Size = UDim2.new(0, swatchSize, 0, swatchSize), Position = UDim2.new(1, -elementPadding, 0.5, 0),
-   AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = initialValue, Text = "", ZIndex = 1, Parent = PickerFrame
-})
-Utility.createCorner(ColorSwatch, 4)
-Utility.createStroke(ColorSwatch, SelectedTheme.ElementStroke, 1) -- Add stroke to swatch
-
--- Function to toggle the color picker popup
-local function togglePickerPopup(forceClose)
-   if pickerOpen and not forceClose then -- Close it
-       pickerOpen = false
-       if pickerFrame and pickerFrame.Parent then
-           local pickerTween = TweenService:Create(pickerFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(pickerFrame.Size.X.Scale, pickerFrame.Size.X.Offset, 0, 0), BackgroundTransparency = 1 })
-           pickerTween:Play()
-           Utility.Connect(pickerTween.Completed, function()
-               Utility.destroyInstance(pickerFrame)
-               pickerFrame = nil
-           end)
-       end
-       stroke.Color = SelectedTheme.ElementStroke -- Reset main frame stroke
-       if tooltip then Utility.hideTooltip() end
-
-   elseif not pickerOpen and not forceClose then -- Open it
-       pickerOpen = true
-       stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled -- Highlight main frame stroke
-
-       local pickerWidth = 200
-       local pickerHeight = 230
-       local pickerYPos = elementHeight + 2
-
-       -- Theme update function for the picker popup itself
-       local updatePopupTheme = function(instance)
-           instance.BackgroundColor3 = SelectedTheme.ColorPickerBackground
-           local popupStroke = instance:FindFirstChildOfClass("UIStroke")
-           if popupStroke then popupStroke.Color = SelectedTheme.ElementStroke end
-           -- Theme updates for internal elements are handled by the main updateTheme
-       end
-
-       pickerFrame = Utility.createInstance("Frame", {
-           Name = "PickerPopup", Size = UDim2.new(0, pickerWidth, 0, 0), -- Start height 0
-           Position = UDim2.new(1, -elementPadding - pickerWidth, 0, pickerYPos), -- Position top-right relative to main frame
-           AnchorPoint = Vector2.new(0, 0), BackgroundColor3 = SelectedTheme.ColorPickerBackground,
-           BackgroundTransparency = 1, BorderSizePixel = 0, ClipsDescendants = true, ZIndex = 100, Parent = PickerFrame
-       }, "ColorPickerPopup", updatePopupTheme) -- Track popup
-       Utility.createCorner(pickerFrame, 6)
-       Utility.createStroke(pickerFrame, SelectedTheme.ElementStroke, 1)
-
-       -- Internal Picker Elements (Saturation/Value Box, Hue Slider)
-       local svBoxSize = 170
-       local hueSliderWidth = 15
-       local padding = (pickerWidth - svBoxSize - hueSliderWidth) / 3
-
-       -- Saturation/Value Box
-       local SV_Box = Utility.createInstance("Frame", {
-           Name = "SV_Box", Size = UDim2.new(0, svBoxSize, 0, svBoxSize), Position = UDim2.new(0, padding, 0, padding),
-           BackgroundColor3 = Color3.new(1,1,1), -- Updated by hue
-           ClipsDescendants = true, Parent = pickerFrame
-       })
-       Utility.createCorner(SV_Box, 4)
-       local SaturationGradient = Utility.createInstance("UIGradient", {
-           Name = "Saturation", Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.new(1, 1, 1)), -- White -> Hue Color
-           Rotation = 90, Parent = SV_Box
-       })
-       local ValueGradient = Utility.createInstance("UIGradient", {
-           Name = "Value", Color = ColorSequence.new(Color3.new(0, 0, 0, 1), Color3.new(0, 0, 0, 0)), -- Transparent -> Black
-           Rotation = 0, Parent = SV_Box
-       })
-       local SV_Cursor = Utility.createInstance("Frame", {
-           Name = "Cursor", Size = UDim2.new(0, 8, 0, 8), Position = UDim2.fromScale(0.5, 0.5), -- Updated later
-           AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = SelectedTheme.TextColor, BorderSizePixel = 1, BorderColor3 = Color3.new(0,0,0),
-           ZIndex = 2, Parent = SV_Box
-       })
-       Utility.createCorner(SV_Cursor, 4)
-
-       -- Hue Slider
-       local Hue_Slider = Utility.createInstance("Frame", {
-           Name = "Hue_Slider", Size = UDim2.new(0, hueSliderWidth, 0, svBoxSize), Position = UDim2.new(0, padding + svBoxSize + padding, 0, padding),
-           BackgroundColor3 = Color3.new(1,1,1), ClipsDescendants = true, Parent = pickerFrame
-       })
-       Utility.createCorner(Hue_Slider, hueSliderWidth / 2)
-       local Hue_Gradient = Utility.createInstance("UIGradient", {
-           Name = "Gradient", Rotation = 0, Parent = Hue_Slider,
-           Color = ColorSequence.new({
-               ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),   -- Red
-               ColorSequenceKeypoint.new(1/6, Color3.fromRGB(255, 255, 0)), -- Yellow
-               ColorSequenceKeypoint.new(2/6, Color3.fromRGB(0, 255, 0)),   -- Lime
-               ColorSequenceKeypoint.new(3/6, Color3.fromRGB(0, 255, 255)), -- Cyan
-               ColorSequenceKeypoint.new(4/6, Color3.fromRGB(0, 0, 255)),   -- Blue
-               ColorSequenceKeypoint.new(5/6, Color3.fromRGB(255, 0, 255)), -- Magenta
-               ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))    -- Red (wrap)
-           })
-       })
-       local Hue_Cursor = Utility.createInstance("Frame", {
-           Name = "Cursor", Size = UDim2.new(1, 4, 0, 4), Position = UDim2.fromScale(0.5, 0), -- Y updated later
-           AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = SelectedTheme.TextColor, BorderSizePixel = 1, BorderColor3 = Color3.new(0,0,0),
-           ZIndex = 2, Parent = Hue_Slider
-       })
-       Utility.createCorner(Hue_Cursor, 2)
-
-       -- Hex Input (Optional) - Add below SV box and Hue slider
-       local HexInput = Utility.createInstance("TextBox", {
-           Name = "HexInput", Size = UDim2.new(1, -(padding*2), 0, 25), Position = UDim2.new(0, padding, 0, padding + svBoxSize + padding),
-           BackgroundColor3 = SelectedTheme.InputBackground, Font = Enum.Font.Gotham, Text = "", PlaceholderText = "Hex: #FFFFFF",
-           TextColor3 = SelectedTheme.TextColor, PlaceholderColor3 = SelectedTheme.InputPlaceholder, TextSize = 12, ClearTextOnFocus = false,
-           Parent = pickerFrame
-       })
-       Utility.createCorner(HexInput, 4)
-       Utility.createStroke(HexInput, SelectedTheme.InputStroke, 1)
-
-       -- Picker Logic
-       local currentH, currentS, currentV = Color3.toHSV(LuminaUI.Flags[flag].Value)
-       local svDragging = false
-       local hueDragging = false
-
-       local function updateColor(newH, newS, newV, triggerCallback, updateHex)
-           triggerCallback = triggerCallback == nil and true or triggerCallback
-           updateHex = updateHex == nil and true or updateHex
-
-           currentH, currentS, newV = newH, newS, newV -- Update state
-           local newColor = Color3.fromHSV(currentH, currentS, currentV)
-
-           -- Update Flag and Swatch
-           LuminaUI.Flags[flag].Value = newColor
-           ColorSwatch.BackgroundColor3 = newColor
-
-           -- Update SV Box background (hue part) and Saturation gradient
-           local hueColor = Color3.fromHSV(currentH, 1, 1)
-           SV_Box.BackgroundColor3 = hueColor
-           SaturationGradient.Color = ColorSequence.new(Color3.new(1, 1, 1), hueColor)
-
-           -- Update Cursors
-           SV_Cursor.Position = UDim2.fromScale(currentS, 1 - currentV)
-           Hue_Cursor.Position = UDim2.fromScale(0.5, currentH)
-
-           -- Update Hex Input
-           if updateHex then
-               HexInput.Text = string.format("#%02X%02X%02X", newColor.R * 255, newColor.G * 255, newColor.B * 255)
+           if tooltip then Utility.showTooltip(tooltip) end
+        end)
+        Utility.Connect(DropdownInteract.MouseLeave, function()
+           if not dropdownOpen then
+               TweenService:Create(DropdownFrame, TweenInfo.new(0.2), { BackgroundColor3 = SelectedTheme.ElementBackground }):Play()
+               stroke.Color = SelectedTheme.ElementStroke
            end
+            if tooltip then Utility.hideTooltip() end
+        end)
+        Utility.Connect(DropdownInteract.MouseButton1Click, function()
+           toggleDropdownList()
+        end)
 
-           -- Trigger Callback
-           if triggerCallback then
-               local success, err = pcall(callback, newColor)
-               if not success then warn("LuminaUI ColorPicker Error:", err) end
-           end
-       end
+        -- Close dropdown if clicked outside
+        local function checkClickOutside(input)
+           if not dropdownOpen or not dropdownList or not dropdownList.Parent then return end
 
-       -- Initial update for picker state
-       updateColor(currentH, currentS, currentV, false, true)
-
-       -- SV Box Interaction
-       local svInteract = Utility.createInstance("TextButton", { Name="Interact", Size=UDim2.fromScale(1,1), BackgroundTransparency=1, Text="", ZIndex=1, Parent=SV_Box })
-       local function handleSVInput(input)
            local mousePos = input.Position
-           local boxPos = SV_Box.AbsolutePosition
-           local boxSize = SV_Box.AbsoluteSize
-           local relativeX = math.clamp((mousePos.X - boxPos.X) / boxSize.X, 0, 1) -- Saturation
-           local relativeY = math.clamp((mousePos.Y - boxPos.Y) / boxSize.Y, 0, 1) -- 1 - Value
-           updateColor(currentH, relativeX, 1 - relativeY)
-       end
-       Utility.Connect(svInteract.InputBegan, function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then svDragging = true; handleSVInput(input); UserInputService.TextSelectionEnabled = false; end end)
-       Utility.Connect(UserInputService.InputEnded, function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 and svDragging then svDragging = false; UserInputService.TextSelectionEnabled = true; end end)
-       Utility.Connect(UserInputService.InputChanged, function(input) if input.UserInputType == Enum.UserInputType.MouseMovement and svDragging then handleSVInput(input) end end)
+           local framePos = DropdownFrame.AbsolutePosition
+           local frameSize = DropdownFrame.AbsoluteSize
+           local listPos = dropdownList.AbsolutePosition
+           local listSize = dropdownList.AbsoluteSize
 
-       -- Hue Slider Interaction
-       local hueInteract = Utility.createInstance("TextButton", { Name="Interact", Size=UDim2.fromScale(1,1), BackgroundTransparency=1, Text="", ZIndex=1, Parent=Hue_Slider })
-       local function handleHueInput(input)
-           local mouseY = input.Position.Y
-           local sliderPos = Hue_Slider.AbsolutePosition
-           local sliderSize = Hue_Slider.AbsoluteSize
-           local relativeY = math.clamp((mouseY - sliderPos.Y) / sliderSize.Y, 0, 1) -- Hue
-           updateColor(relativeY, currentS, currentV)
-       end
-       Utility.Connect(hueInteract.InputBegan, function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then hueDragging = true; handleHueInput(input); UserInputService.TextSelectionEnabled = false; end end)
-       Utility.Connect(UserInputService.InputEnded, function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 and hueDragging then hueDragging = false; UserInputService.TextSelectionEnabled = true; end end)
-       Utility.Connect(UserInputService.InputChanged, function(input) if input.UserInputType == Enum.UserInputType.MouseMovement and hueDragging then handleHueInput(input) end end)
+           -- Check if click is outside both the main frame and the list
+           local inFrame = mousePos.X >= framePos.X and mousePos.X <= framePos.X + frameSize.X and mousePos.Y >= framePos.Y and mousePos.Y <= framePos.Y + frameSize.Y
+           local inList = mousePos.X >= listPos.X and mousePos.X <= listPos.X + listSize.X and mousePos.Y >= listPos.Y and mousePos.Y <= listPos.Y + listSize.Y
 
-       -- Hex Input Interaction
-       Utility.Connect(HexInput.FocusLost, function(enterPressed)
-           if enterPressed then
-               local text = HexInput.Text:gsub("#", "")
-               if text:match("^[0-9a-fA-F]{6}$") then
-                   local r = tonumber("0x"..text:sub(1,2)) / 255
-                   local g = tonumber("0x"..text:sub(3,4)) / 255
-                   local b = tonumber("0x"..text:sub(5,6)) / 255
-                   local newColor = Color3.new(r, g, b)
-                   local h, s, v = Color3.toHSV(newColor)
-                   updateColor(h, s, v, true, false) -- Update picker from hex, don't re-update hex box
+           if not inFrame and not inList then
+               toggleDropdownList(true) -- Force close
+           end
+        end
+        -- Use InputBegan on UserInputService for more reliable outside click detection
+        local clickOutsideConnection = Utility.Connect(UserInputService.InputBegan, function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                checkClickOutside(input)
+            end
+        end)
+        -- Disconnect this listener when the dropdown is destroyed (handled by Utility.destroyInstance)
+        Utility.storeConnection(DropdownFrame, clickOutsideConnection)
+
+
+        -- API to update dropdown state externally
+        local DropdownAPI = {
+           Instance = DropdownFrame,
+           Type = "Dropdown",
+           Flag = flag,
+           SetValue = function(newValue)
+               -- Validate input based on multi-select
+               local validValue
+               if allowMultiSelect then
+                   validValue = {}
+                   newValue = type(newValue) == "table" and newValue or {newValue}
+                   for _, v in ipairs(newValue) do
+                       if table.find(values, v) then table.insert(validValue, v) end
+                   end
+                   table.sort(validValue)
                else
-                   -- Revert to current color if invalid hex
-                   local currentColor = LuminaUI.Flags[flag].Value
-                   HexInput.Text = string.format("#%02X%02X%02X", currentColor.R * 255, currentColor.G * 255, currentColor.B * 255)
+                   if table.find(values, newValue) then
+                       validValue = newValue
+                   else
+                       warn("LuminaUI: Invalid value '"..tostring(newValue).."' for Dropdown '"..flag.."'. Setting to default.")
+                       validValue = values[1] -- Set to first option if invalid
+                   end
+               end
+
+               LuminaUI.Flags[flag].Value = validValue
+               updateValueLabel()
+               updateTheme(DropdownFrame) -- Update visuals
+           end,
+           GetValue = function()
+               return LuminaUI.Flags[flag].Value
+           end,
+           SetValues = function(newValues) -- Function to update the list of options
+               if type(newValues) ~= "table" then warn("LuminaUI: SetValues requires a table."); return end
+               values = newValues
+               -- Reset selection to default or first item if current selection is no longer valid
+               local currentSelection = LuminaUI.Flags[flag].Value
+               local newSelection
+               if allowMultiSelect then
+                   newSelection = {}
+                   for _, v in ipairs(currentSelection) do
+                       if table.find(values, v) then table.insert(newSelection, v) end
+                   end
+                   table.sort(newSelection)
+               else
+                   if not table.find(values, currentSelection) then
+                       newSelection = #values > 0 and values[1] or ""
+                   else
+                       newSelection = currentSelection
+                   end
+               end
+               LuminaUI.Flags[flag].Value = newSelection
+               updateValueLabel()
+               -- Rebuild dropdown if open
+               if dropdownOpen then
+                   toggleDropdownList(true) -- Close first
+                   -- Optionally reopen immediately? toggleDropdownList()
+               end
+               updateTheme(DropdownFrame) -- Update visuals
+           end
+        }
+        Tab.Elements[flag] = DropdownAPI -- Store API under flag name
+
+        return DropdownAPI
+        end
+
+        -- CreateTextbox (Refactored with Theme Update)
+        function Tab:CreateTextbox(options)
+        options = options or {}
+        local textboxName = options.Name or "Textbox"
+        local flag = options.Flag -- Mandatory flag name
+        local defaultValue = options.Default or ""
+        local placeholder = options.Placeholder or "Enter text..."
+        local clearOnFocus = options.ClearOnFocus or false -- Whether to clear placeholder on focus
+        local numeric = options.Numeric or false -- Only allow numbers (and optionally '.')
+        local maxLength = options.MaxLength or 100 -- Max input length
+        local callback = options.Callback or function(value) print(textboxName .. " text: " .. value) end
+        local finishedCallback = options.FinishedCallback or callback -- Called on FocusLost
+        local icon = options.Icon
+        local tooltip = options.Tooltip
+
+        if not flag then warn("LuminaUI: Textbox '" .. textboxName .. "' requires a 'Flag' option."); return end
+
+        local initialValue = registerFlag(flag, defaultValue, "Textbox")
+
+        local elementHeight = 36
+        local elementPadding = 10
+        local iconSize = 20
+
+        local updateTheme = function(instance)
+           local textbox = instance:FindFirstChild("Input")
+           local iconLabel = instance:FindFirstChild("Icon")
+           local stroke = instance:FindFirstChildOfClass("UIStroke")
+
+           instance.BackgroundColor3 = SelectedTheme.InputBackground
+           if stroke then stroke.Color = SelectedTheme.InputStroke end
+           if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
+
+           if textbox then
+               textbox.TextColor3 = SelectedTheme.TextColor
+               textbox.PlaceholderColor3 = SelectedTheme.InputPlaceholder
+               -- Re-apply placeholder if needed (tricky, might need state tracking)
+           end
+        end
+
+        local TextboxFrame = Utility.createInstance("Frame", {
+           Name = "Textbox_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
+           BackgroundColor3 = SelectedTheme.InputBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
+        }, "Textbox", updateTheme) -- Track Textbox
+        Utility.createCorner(TextboxFrame, 4)
+        local stroke = Utility.createStroke(TextboxFrame, SelectedTheme.InputStroke, 1)
+
+        local textXOffset = elementPadding
+        if icon then
+            local TextboxIcon = Utility.createInstance("ImageLabel", {
+                Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
+                AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
+                ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = TextboxFrame
+            })
+            textXOffset = elementPadding + iconSize + 8
+        end
+
+        local InputBox = Utility.createInstance("TextBox", {
+           Name = "Input", Size = UDim2.new(1, -(textXOffset + elementPadding), 1, -6), -- Padding top/bottom
+           Position = UDim2.new(0, textXOffset, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
+           BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = initialValue, TextColor3 = SelectedTheme.TextColor,
+           TextSize = 13, PlaceholderText = placeholder, PlaceholderColor3 = SelectedTheme.InputPlaceholder,
+           ClearTextOnFocus = clearOnFocus, TextXAlignment = Enum.TextXAlignment.Left, MultiLine = false,
+           Parent = TextboxFrame
+        })
+
+        -- Numeric filtering
+        if numeric then
+           Utility.Connect(InputBox:GetPropertyChangedSignal("Text"), function()
+               local text = InputBox.Text
+               local filtered = text:gsub("[^%d%.%-]", "") -- Allow digits, period, minus
+               -- Ensure only one decimal point and minus at the start
+               local minusCount = 0
+               local decimalCount = 0
+               local finalFiltered = ""
+               for i = 1, #filtered do
+                   local char = filtered:sub(i, i)
+                   if char == "-" then
+                       if i == 1 and minusCount == 0 then
+                           finalFiltered = finalFiltered .. char
+                           minusCount = minusCount + 1
+                       end
+                   elseif char == "." then
+                       if decimalCount == 0 then
+                           finalFiltered = finalFiltered .. char
+                           decimalCount = decimalCount + 1
+                       end
+                   else
+                       finalFiltered = finalFiltered .. char
+                   end
+               end
+
+               if InputBox.Text ~= finalFiltered then
+                   InputBox.Text = finalFiltered
+               end
+           end)
+        end
+
+        -- Max length handling (simple truncation)
+        if maxLength > 0 then
+            Utility.Connect(InputBox:GetPropertyChangedSignal("Text"), function()
+               if string.len(InputBox.Text) > maxLength then
+                   InputBox.Text = string.sub(InputBox.Text, 1, maxLength)
+               end
+           end)
+        end
+
+        -- Callbacks
+        Utility.Connect(InputBox:GetPropertyChangedSignal("Text"), function()
+           local newValue = InputBox.Text
+           if numeric and newValue ~= "" and newValue ~= "-" and newValue ~= "." and newValue ~= "-." then
+               newValue = tonumber(newValue) or 0 -- Convert to number if possible
+           end
+           if LuminaUI.Flags[flag].Value ~= newValue then
+               LuminaUI.Flags[flag].Value = newValue
+               local success, err = pcall(callback, newValue)
+               if not success then warn("LuminaUI Textbox Error:", err) end
+           end
+        end)
+
+        Utility.Connect(InputBox.FocusLost, function(enterPressed)
+           if enterPressed then
+               local newValue = InputBox.Text
+               if numeric and newValue ~= "" and newValue ~= "-" and newValue ~= "." and newValue ~= "-." then
+                   newValue = tonumber(newValue) or 0
+               end
+               -- Ensure flag is updated before calling finishedCallback
+               if LuminaUI.Flags[flag].Value ~= newValue then
+                    LuminaUI.Flags[flag].Value = newValue
+                    -- Call regular callback too if value changed on focus lost
+                    local cb_success, cb_err = pcall(callback, newValue)
+                    if not cb_success then warn("LuminaUI Textbox Error:", cb_err) end
+               end
+               -- Call finished callback
+               local success, err = pcall(finishedCallback, newValue)
+               if not success then warn("LuminaUI Textbox Finish Error:", err) end
+           end
+           -- Reset placeholder if needed and box is empty
+           if InputBox.Text == "" then
+               InputBox.ClearTextOnFocus = clearOnFocus -- Reset property just in case
+           end
+           stroke.Color = SelectedTheme.InputStroke -- Reset stroke color
+           if tooltip then Utility.hideTooltip() end
+        end)
+
+        Utility.Connect(InputBox.Focused, function()
+           stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled -- Highlight on focus
+           if tooltip then Utility.showTooltip(tooltip) end
+        end)
+
+        -- API to update textbox state externally
+        local TextboxAPI = {
+           Instance = TextboxFrame,
+           Type = "Textbox",
+           Flag = flag,
+           SetValue = function(newValue)
+               InputBox.Text = tostring(newValue) -- Update TextBox text
+               -- Flag will be updated by the TextChanged signal
+           end,
+           GetValue = function()
+               return LuminaUI.Flags[flag].Value
+           end,
+           Focus = function() InputBox:CaptureFocus() end,
+           Unfocus = function() InputBox:ReleaseFocus() end
+        }
+        Tab.Elements[flag] = TextboxAPI -- Store API under flag name
+
+        return TextboxAPI
+        end
+
+        -- CreateLabel (Refactored with Theme Update)
+        function Tab:CreateLabel(options)
+        options = options or {}
+        local text = options.Name or "Label Text" -- Use Name as text if Text not provided
+        text = options.Text or text
+        local size = options.Size or 13
+        local alignment = options.Alignment or Enum.TextXAlignment.Left
+        local wrap = options.Wrap or false
+        local icon = options.Icon
+
+        local elementPadding = 10
+        local iconSize = 16 -- Smaller icon for labels usually
+
+        local updateTheme = function(instance)
+           local iconLabel = instance:FindFirstChild("Icon")
+           local textLabel = instance:FindFirstChild("Text")
+           if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
+           if textLabel then textLabel.TextColor3 = SelectedTheme.TextColor end
+        end
+
+        -- Calculate required height if wrapping
+        local textBounds = Utility.getTextBounds(text, Enum.Font.Gotham, size, ElementsContainer.AbsoluteSize.X - (ElementsPadding.PaddingLeft.Offset + ElementsPadding.PaddingRight.Offset) - (icon and (iconSize + 8) or 0) - (elementPadding * 2))
+        local elementHeight = wrap and math.max(20, textBounds.Y + 10) or 20 -- Min height 20
+
+        local LabelFrame = Utility.createInstance("Frame", {
+           Name = "Label_" .. text:gsub("%s+", "_"):sub(1, 20), -- Create somewhat unique name
+           Size = UDim2.new(1, 0, 0, elementHeight), BackgroundTransparency = 1,
+           LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
+        }, "Label", updateTheme) -- Track Label
+
+        local textXOffset = elementPadding
+        if icon then
+            local LabelIcon = Utility.createInstance("ImageLabel", {
+                Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
+                AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
+                ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = LabelFrame
+            })
+            textXOffset = elementPadding + iconSize + 8
+        end
+
+        local Text = Utility.createInstance("TextLabel", {
+           Name = "Text", Size = UDim2.new(1, -(textXOffset + elementPadding), 1, 0), Position = UDim2.new(0, textXOffset, 0, 0),
+           BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = text, TextColor3 = SelectedTheme.TextColor,
+           TextSize = size, TextWrapped = wrap, TextXAlignment = alignment, TextYAlignment = Enum.TextYAlignment.Center, Parent = LabelFrame
+        })
+
+        -- API for label
+        local LabelAPI = {
+           Instance = LabelFrame,
+           Type = "Label",
+           SetText = function(newText)
+               Text.Text = newText
+               -- Recalculate height if wrapping enabled
+               if wrap then
+                   local newBounds = Utility.getTextBounds(newText, Text.Font, Text.TextSize, ElementsContainer.AbsoluteSize.X - (ElementsPadding.PaddingLeft.Offset + ElementsPadding.PaddingRight.Offset) - (icon and (iconSize + 8) or 0) - (elementPadding * 2))
+                   LabelFrame.Size = UDim2.new(1, 0, 0, math.max(20, newBounds.Y + 10))
+               end
+           end,
+           SetIcon = function(newIconId)
+                local iconLabel = LabelFrame:FindFirstChild("Icon")
+                if newIconId then
+                    if iconLabel then
+                        iconLabel.Image = Utility.loadIcon(newIconId)
+                    else
+                        -- Create icon if it didn't exist
+                        iconLabel = Utility.createInstance("ImageLabel", {
+                            Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
+                            AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(newIconId),
+                            ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = LabelFrame
+                        })
+                        textXOffset = elementPadding + iconSize + 8
+                        Text.Position = UDim2.new(0, textXOffset, 0, 0)
+                        Text.Size = UDim2.new(1, -(textXOffset + elementPadding), 1, 0)
+                    end
+                elseif iconLabel then
+                    -- Remove icon if newIconId is nil/false
+                    Utility.destroyInstance(iconLabel)
+                    textXOffset = elementPadding
+                    Text.Position = UDim2.new(0, textXOffset, 0, 0)
+                    Text.Size = UDim2.new(1, -(textXOffset + elementPadding), 1, 0)
+                end
+           end
+        }
+        Tab.Elements["Label_" .. text:gsub("%s+", "_"):sub(1, 20)] = LabelAPI -- Store API
+
+        return LabelAPI
+        end
+
+        -- CreateDivider (Refactored with Theme Update)
+        function Tab:CreateDivider(options)
+        options = options or {}
+        local thickness = options.Thickness or 1
+        local color = options.Color -- Optional override
+        local padding = options.Padding or 5 -- Vertical padding
+
+        local updateTheme = function(instance)
+           instance.BackgroundColor3 = color or SelectedTheme.ElementStroke
+           instance.BackgroundTransparency = color and 0 or 0.8 -- Make default less prominent
+        end
+
+        local DividerFrame = Utility.createInstance("Frame", {
+           Name = "Divider", Size = UDim2.new(1, 0, 0, thickness), BackgroundColor3 = color or SelectedTheme.ElementStroke,
+           BackgroundTransparency = color and 0 or 0.8, BorderSizePixel = 0, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
+        }, "Divider", updateTheme) -- Track Divider
+
+        -- Add padding using margins (simpler than extra frames)
+        DividerFrame.LayoutMargin = UDim.new(0, padding) -- Apply vertical margin
+
+        -- API for divider
+        local DividerAPI = {
+           Instance = DividerFrame,
+           Type = "Divider",
+           SetColor = function(newColor)
+               color = newColor -- Store override
+               DividerFrame.BackgroundColor3 = newColor
+               DividerFrame.BackgroundTransparency = 0
+           end,
+           SetThickness = function(newThickness)
+               DividerFrame.Size = UDim2.new(1, 0, 0, newThickness)
+           end
+        }
+        Tab.Elements["Divider_" .. #TabPage:GetChildren()] = DividerAPI -- Store API
+
+        return DividerAPI
+        end
+
+        -- CreateKeybind (Refactored with Theme Update and Key System Integration)
+        function Tab:CreateKeybind(options)
+        options = options or {}
+        local keybindName = options.Name or "Keybind"
+        local flag = options.Flag -- Mandatory flag name
+        local defaultKey = options.Default or Enum.KeyCode.None -- Default key
+        local defaultModifiers = options.Modifiers or { Shift = false, Ctrl = false, Alt = false }
+        local callback = options.Callback or function() print(keybindName .. " triggered") end
+        local allowMouse = options.AllowMouse or false -- Allow mouse buttons?
+        local tooltip = options.Tooltip
+
+        if not flag then warn("LuminaUI: Keybind '" .. keybindName .. "' requires a 'Flag' option."); return end
+        if not settings.KeySystem or not settings.KeySystem.Enabled then warn("LuminaUI: Key System disabled, Keybind element will not function."); return end
+
+        -- Register flag with default key data structure
+        local initialValue = registerFlag(flag, { Key = defaultKey, Modifiers = defaultModifiers }, "Keybind")
+
+        local elementHeight = 36
+        local elementPadding = 10
+        local keyWidth = 100
+        local listening = false -- Is this keybind currently waiting for input?
+
+        local updateTheme = function(instance)
+           local keyButton = instance:FindFirstChild("KeyButton")
+           local label = instance:FindFirstChild("Label")
+           local stroke = instance:FindFirstChildOfClass("UIStroke")
+
+           instance.BackgroundColor3 = SelectedTheme.ElementBackground
+           if stroke then stroke.Color = SelectedTheme.ElementStroke end
+           if label then label.TextColor3 = SelectedTheme.TextColor end
+
+           if keyButton then
+               keyButton.BackgroundColor3 = SelectedTheme.InputBackground
+               local keyStroke = keyButton:FindFirstChildOfClass("UIStroke")
+               if keyStroke then keyStroke.Color = SelectedTheme.InputStroke end
+               local keyLabel = keyButton:FindFirstChild("KeyLabel")
+               if keyLabel then keyLabel.TextColor3 = SelectedTheme.TextColor end
+           end
+        end
+
+        local KeybindFrame = Utility.createInstance("Frame", {
+           Name = "Keybind_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
+           BackgroundColor3 = SelectedTheme.ElementBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
+        }, "Keybind", updateTheme) -- Track Keybind
+        Utility.createCorner(KeybindFrame, 4)
+        local stroke = Utility.createStroke(KeybindFrame, SelectedTheme.ElementStroke, 1)
+
+        -- Label
+        local KeybindLabel = Utility.createInstance("TextLabel", {
+           Name = "Label", Size = UDim2.new(1, -(elementPadding * 2 + keyWidth), 1, 0), Position = UDim2.new(0, elementPadding, 0, 0),
+           BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = keybindName, TextColor3 = SelectedTheme.TextColor,
+           TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = KeybindFrame
+        })
+
+        -- Key Button
+        local KeyButton = Utility.createInstance("TextButton", {
+           Name = "KeyButton", Size = UDim2.new(0, keyWidth, 1, -10), Position = UDim2.new(1, -elementPadding, 0.5, 0),
+           AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = SelectedTheme.InputBackground, Font = Enum.Font.GothamBold,
+           Text = "", TextColor3 = SelectedTheme.TextColor, TextSize = 12, ZIndex = 1, Parent = KeybindFrame
+        })
+        Utility.createCorner(KeyButton, 4)
+        local keyStroke = Utility.createStroke(KeyButton, SelectedTheme.InputStroke, 1)
+        local KeyLabel = KeyButton -- Use TextButton directly for text
+
+        -- Function to format key display text
+        local function formatKeyText(keyData)
+           if listening then return "..." end
+           if not keyData or keyData.Key == Enum.KeyCode.None then return "None" end
+
+           local text = ""
+           if keyData.Modifiers.Ctrl then text = text .. "Ctrl + " end
+           if keyData.Modifiers.Alt then text = text .. "Alt + " end
+           if keyData.Modifiers.Shift then text = text .. "Shift + " end
+
+           local keyName = keyData.Key.Name
+           -- Simple replacements for common mouse buttons if allowed
+           if allowMouse then
+               if keyData.Key == Enum.UserInputType.MouseButton1 then keyName = "MB1"
+               elseif keyData.Key == Enum.UserInputType.MouseButton2 then keyName = "MB2"
+               elseif keyData.Key == Enum.UserInputType.MouseButton3 then keyName = "MB3" end
+           end
+           text = text .. keyName
+
+           return text
+        end
+
+        -- Function to register/unregister the actual keybind listener
+        local function updateKeyListener()
+           local keyData = LuminaUI.Flags[flag].Value
+           local keybindId = "LuminaKeybind_" .. flag
+
+           -- Remove existing listener for this flag
+           if LuminaUI._Keybinds[keybindId] then
+               LuminaUI._Keybinds[keybindId] = nil
+           end
+
+           -- Add new listener if key is set
+           if keyData and keyData.Key ~= Enum.KeyCode.None then
+               LuminaUI._Keybinds[keybindId] = {
+                   Key = keyData.Key,
+                   Modifiers = keyData.Modifiers,
+                   Callback = callback,
+                   SourceInstance = KeybindFrame -- Reference to UI element
+               }
+           end
+        end
+
+        -- Initial setup
+        KeyLabel.Text = formatKeyText(initialValue)
+        updateKeyListener()
+
+        -- Input Listening Logic
+        local inputConnection = nil
+        local function stopListening(newKeyData)
+           if not listening then return end
+           listening = false
+           if inputConnection then inputConnection:Disconnect(); inputConnection = nil end
+
+           -- Restore focus behavior? Maybe not needed for keybinds.
+
+           if newKeyData then
+               -- Validate (e.g., don't allow modifier keys alone?)
+               if newKeyData.Key == Enum.KeyCode.LeftShift or newKeyData.Key == Enum.KeyCode.RightShift or
+                  newKeyData.Key == Enum.KeyCode.LeftControl or newKeyData.Key == Enum.KeyCode.RightControl or
+                  newKeyData.Key == Enum.KeyCode.LeftAlt or newKeyData.Key == Enum.KeyCode.RightAlt then
+                   warn("LuminaUI: Modifier keys cannot be assigned alone.")
+                   KeyLabel.Text = formatKeyText(LuminaUI.Flags[flag].Value) -- Revert text
+               else
+                   LuminaUI.Flags[flag].Value = newKeyData
+                   KeyLabel.Text = formatKeyText(newKeyData)
+                   updateKeyListener() -- Update the actual listener
+               end
+           else
+               -- Clicked outside or Esc pressed, revert text
+               KeyLabel.Text = formatKeyText(LuminaUI.Flags[flag].Value)
+           end
+
+           -- Reset visual state
+           keyStroke.Color = SelectedTheme.InputStroke
+           KeyLabel.TextColor3 = SelectedTheme.TextColor
+           if tooltip then Utility.hideTooltip() end
+        end
+
+        Utility.Connect(KeyButton.MouseButton1Click, function()
+           if listening then return end -- Already listening
+           listening = true
+           KeyLabel.Text = "..."
+           keyStroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
+           KeyLabel.TextColor3 = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled
+           if tooltip then Utility.showTooltip("Press any key or Esc to cancel...") end
+
+           -- Start listening for the next input
+           inputConnection = Utility.Connect(UserInputService.InputBegan, function(input, gameProcessed)
+               if gameProcessed then return end -- Ignore game processed input
+
+               local inputType = input.UserInputType
+               local keyCode = input.KeyCode
+
+               -- Check if it's an allowed key type
+               if inputType == Enum.UserInputType.Keyboard or (allowMouse and (inputType == Enum.UserInputType.MouseButton1 or inputType == Enum.UserInputType.MouseButton2 or inputType == Enum.UserInputType.MouseButton3)) then
+                   -- Escape key cancels
+                   if keyCode == Enum.KeyCode.Escape then
+                       stopListening(nil)
+                       return
+                   end
+
+                   -- Capture key and modifiers
+                   local modifiers = {
+                       Shift = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift),
+                       Ctrl = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl),
+                       Alt = UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) or UserInputService:IsKeyDown(Enum.KeyCode.RightAlt)
+                   }
+                   -- Use UserInputType for mouse buttons, KeyCode for keyboard
+                   local capturedKey = inputType == Enum.UserInputType.Keyboard and keyCode or inputType
+
+                   stopListening({ Key = capturedKey, Modifiers = modifiers })
+               end
+           end)
+        end)
+
+        -- Stop listening if clicked outside the button
+        local clickOutsideKeyListener = Utility.Connect(UserInputService.InputBegan, function(input)
+            if listening and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+                -- Check if the click was on the KeyButton itself
+                local mousePos = input.Position
+                local buttonPos = KeyButton.AbsolutePosition
+                local buttonSize = KeyButton.AbsoluteSize
+                if not (mousePos.X >= buttonPos.X and mousePos.X <= buttonPos.X + buttonSize.X and mousePos.Y >= buttonPos.Y and mousePos.Y <= buttonPos.Y + buttonSize.Y) then
+                    stopListening(nil) -- Clicked outside, cancel
+                end
+            end
+        end)
+        Utility.storeConnection(KeybindFrame, clickOutsideKeyListener)
+
+        -- API to update keybind state externally
+        local KeybindAPI = {
+           Instance = KeybindFrame,
+           Type = "Keybind",
+           Flag = flag,
+           SetValue = function(newKeyData) -- Expects { Key = Enum.KeyCode/UserInputType, Modifiers = { Shift=bool, Ctrl=bool, Alt=bool } }
+               if type(newKeyData) == "table" and newKeyData.Key and newKeyData.Modifiers then
+                    -- Basic validation
+                    if (type(newKeyData.Key) == "EnumItem" and newKeyData.Key.EnumType == Enum.KeyCode) or
+                       (allowMouse and type(newKeyData.Key) == "EnumItem" and newKeyData.Key.EnumType == Enum.UserInputType) then
+
+                        LuminaUI.Flags[flag].Value = newKeyData
+                        KeyLabel.Text = formatKeyText(newKeyData)
+                        updateKeyListener()
+                    else
+                        warn("LuminaUI: Invalid key data provided for SetValue on Keybind '"..flag.."'")
+                    end
+               else
+                    warn("LuminaUI: Invalid format for SetValue on Keybind '"..flag.."'")
+               end
+           end,
+           GetValue = function()
+               return LuminaUI.Flags[flag].Value
+           end,
+           Trigger = function() -- Manually trigger the callback
+               callback()
+           end
+        }
+        Tab.Elements[flag] = KeybindAPI -- Store API under flag name
+
+        return KeybindAPI
+        end
+
+        -- CreateColorPicker (Refactored with Theme Update)
+        function Tab:CreateColorPicker(options)
+        options = options or {}
+        local pickerName = options.Name or "Color Picker"
+        local flag = options.Flag -- Mandatory flag name
+        local defaultValue = options.Default or Color3.fromRGB(255, 255, 255)
+        local callback = options.Callback or function(value) print(pickerName .. " color: " .. tostring(value)) end
+        local icon = options.Icon
+        local tooltip = options.Tooltip
+
+        if not flag then warn("LuminaUI: ColorPicker '" .. pickerName .. "' requires a 'Flag' option."); return end
+        if typeof(defaultValue) ~= "Color3" then warn("LuminaUI: Default value for ColorPicker '" .. flag .. "' must be a Color3."); defaultValue = Color3.new(1,1,1) end
+
+        local initialValue = registerFlag(flag, defaultValue, "ColorPicker")
+
+        local elementHeight = 36
+        local elementPadding = 10
+        local iconSize = 20
+        local swatchSize = 24
+        local pickerOpen = false
+        local pickerFrame = nil -- Instance reference
+
+        local updateTheme = function(instance)
+           local swatch = instance:FindFirstChild("ColorSwatch")
+           local iconLabel = instance:FindFirstChild("Icon")
+           local label = instance:FindFirstChild("Label")
+           local stroke = instance:FindFirstChildOfClass("UIStroke")
+
+           instance.BackgroundColor3 = SelectedTheme.ElementBackground
+           if stroke then stroke.Color = SelectedTheme.ElementStroke end
+           if iconLabel then iconLabel.ImageColor3 = SelectedTheme.TextColor end
+           if label then label.TextColor3 = SelectedTheme.TextColor end
+
+           if swatch then
+               -- Swatch color is the actual value, no theme update needed unless adding border?
+               local swatchStroke = swatch:FindFirstChildOfClass("UIStroke")
+               if swatchStroke then swatchStroke.Color = SelectedTheme.ElementStroke end
+           end
+
+           -- Update picker frame theme if open
+           if pickerFrame and pickerFrame.Parent then
+               pickerFrame.BackgroundColor3 = SelectedTheme.ColorPickerBackground
+               local pickerStroke = pickerFrame:FindFirstChildOfClass("UIStroke")
+               if pickerStroke then pickerStroke.Color = SelectedTheme.ElementStroke end
+               -- Update internal elements (saturation/value box, hue slider, etc.)
+               local svBox = pickerFrame:FindFirstChild("SV_Box")
+               if svBox then
+                   -- Update gradient? Tricky. Maybe just border/cursor.
+                   local svCursor = svBox:FindFirstChild("Cursor")
+                   if svCursor then svCursor.BackgroundColor3 = SelectedTheme.TextColor end
+               end
+               local hueSlider = pickerFrame:FindFirstChild("Hue_Slider")
+               if hueSlider then
+                   -- Update gradient? Tricky. Maybe just border/cursor.
+                   local hueCursor = hueSlider:FindFirstChild("Cursor")
+                   if hueCursor then hueCursor.BackgroundColor3 = SelectedTheme.TextColor end
                end
            end
-       end)
-
-       -- Animate picker open
-       local pickerTween = TweenService:Create(pickerFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(0, pickerWidth, 0, pickerHeight), BackgroundTransparency = 0 })
-       pickerTween:Play()
-   end
-end
-
--- Effects & Callback for swatch button
-Utility.Connect(ColorSwatch.MouseEnter, function() if tooltip then Utility.showTooltip(tooltip) end end)
-Utility.Connect(ColorSwatch.MouseLeave, function() if tooltip then Utility.hideTooltip() end end)
-Utility.Connect(ColorSwatch.MouseButton1Click, function()
-   togglePickerPopup()
-end)
-
--- Close picker if clicked outside
-local clickOutsidePickerConnection = Utility.Connect(UserInputService.InputBegan, function(input)
-    if pickerOpen and pickerFrame and pickerFrame.Parent and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-        local mousePos = input.Position
-        local framePos = PickerFrame.AbsolutePosition
-        local frameSize = PickerFrame.AbsoluteSize
-        local popupPos = pickerFrame.AbsolutePosition
-        local popupSize = pickerFrame.AbsoluteSize
-
-        -- Check if click is outside both the main frame and the popup
-        local inFrame = mousePos.X >= framePos.X and mousePos.X <= framePos.X + frameSize.X and mousePos.Y >= framePos.Y and mousePos.Y <= framePos.Y + frameSize.Y
-        local inPopup = mousePos.X >= popupPos.X and mousePos.X <= popupPos.X + popupSize.X and mousePos.Y >= popupPos.Y and mousePos.Y <= popupPos.Y + popupSize.Y
-
-        if not inFrame and not inPopup then
-            togglePickerPopup(true) -- Force close
         end
-    end
-end)
-Utility.storeConnection(PickerFrame, clickOutsidePickerConnection)
 
--- API to update color picker state externally
-local ColorPickerAPI = {
-   Instance = PickerFrame,
-   Type = "ColorPicker",
-   Flag = flag,
-   SetValue = function(newColor)
-       if typeof(newColor) == "Color3" then
-           local h, s, v = Color3.toHSV(newColor)
-           if pickerOpen then
-               updateColor(h, s, v, false) -- Update picker visuals if open, don't trigger callback
-           else
-               -- Just update flag and swatch if picker is closed
-               LuminaUI.Flags[flag].Value = newColor
-               ColorSwatch.BackgroundColor3 = newColor
+        local PickerFrame = Utility.createInstance("Frame", {
+           Name = "ColorPicker_" .. flag, Size = UDim2.new(1, 0, 0, elementHeight),
+           BackgroundColor3 = SelectedTheme.ElementBackground, LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage,
+           ClipsDescendants = false -- Allow picker popup
+        }, "ColorPicker", updateTheme) -- Track ColorPicker
+        Utility.createCorner(PickerFrame, 4)
+        local stroke = Utility.createStroke(PickerFrame, SelectedTheme.ElementStroke, 1)
+
+        local textXOffset = elementPadding
+        if icon then
+            local PickerIcon = Utility.createInstance("ImageLabel", {
+                Name = "Icon", Size = UDim2.new(0, iconSize, 0, iconSize), Position = UDim2.new(0, elementPadding, 0.5, 0),
+                AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1, Image = Utility.loadIcon(icon),
+                ImageColor3 = SelectedTheme.TextColor, ScaleType = Enum.ScaleType.Fit, Parent = PickerFrame
+            })
+            textXOffset = elementPadding + iconSize + 8
+        end
+
+        -- Label
+        local PickerLabel = Utility.createInstance("TextLabel", {
+           Name = "Label", Size = UDim2.new(1, -(textXOffset + elementPadding + swatchSize + 10), 1, 0), -- Adjust width for swatch
+           Position = UDim2.new(0, textXOffset, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+           Text = pickerName, TextColor3 = SelectedTheme.TextColor, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = PickerFrame
+        })
+
+        -- Color Swatch Button
+        local ColorSwatch = Utility.createInstance("TextButton", { -- Use TextButton for interaction
+           Name = "ColorSwatch", Size = UDim2.new(0, swatchSize, 0, swatchSize), Position = UDim2.new(1, -elementPadding, 0.5, 0),
+           AnchorPoint = Vector2.new(1, 0.5), BackgroundColor3 = initialValue, Text = "", ZIndex = 1, Parent = PickerFrame
+        })
+        Utility.createCorner(ColorSwatch, 4)
+        Utility.createStroke(ColorSwatch, SelectedTheme.ElementStroke, 1) -- Add stroke to swatch
+
+        -- Function to toggle the color picker popup
+        local function togglePickerPopup(forceClose)
+           if pickerOpen and not forceClose then -- Close it
+               pickerOpen = false
+               if pickerFrame and pickerFrame.Parent then
+                   local pickerTween = TweenService:Create(pickerFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(pickerFrame.Size.X.Scale, pickerFrame.Size.X.Offset, 0, 0), BackgroundTransparency = 1 })
+                   pickerTween:Play()
+                   Utility.Connect(pickerTween.Completed, function()
+                       Utility.destroyInstance(pickerFrame)
+                       pickerFrame = nil
+                   end)
+               end
+               stroke.Color = SelectedTheme.ElementStroke -- Reset main frame stroke
+               if tooltip then Utility.hideTooltip() end
+
+           elseif not pickerOpen and not forceClose then -- Open it
+               pickerOpen = true
+               stroke.Color = SelectedTheme.AccentColor or SelectedTheme.ToggleEnabled -- Highlight main frame stroke
+
+               local pickerWidth = 200
+               local pickerHeight = 230
+               local pickerYPos = elementHeight + 2
+
+               -- Theme update function for the picker popup itself
+               local updatePopupTheme = function(instance)
+                   instance.BackgroundColor3 = SelectedTheme.ColorPickerBackground
+                   local popupStroke = instance:FindFirstChildOfClass("UIStroke")
+                   if popupStroke then popupStroke.Color = SelectedTheme.ElementStroke end
+                   -- Theme updates for internal elements are handled by the main updateTheme
+               end
+
+               pickerFrame = Utility.createInstance("Frame", {
+                   Name = "PickerPopup", Size = UDim2.new(0, pickerWidth, 0, 0), -- Start height 0
+                   Position = UDim2.new(1, -elementPadding - pickerWidth, 0, pickerYPos), -- Position top-right relative to main frame
+                   AnchorPoint = Vector2.new(0, 0), BackgroundColor3 = SelectedTheme.ColorPickerBackground,
+                   BackgroundTransparency = 1, BorderSizePixel = 0, ClipsDescendants = true, ZIndex = 100, Parent = PickerFrame
+               }, "ColorPickerPopup", updatePopupTheme) -- Track popup
+               Utility.createCorner(pickerFrame, 6)
+               Utility.createStroke(pickerFrame, SelectedTheme.ElementStroke, 1)
+
+               -- Internal Picker Elements (Saturation/Value Box, Hue Slider)
+               local svBoxSize = 170
+               local hueSliderWidth = 15
+               local padding = (pickerWidth - svBoxSize - hueSliderWidth) / 3
+
+               -- Saturation/Value Box
+               local SV_Box = Utility.createInstance("Frame", {
+                   Name = "SV_Box", Size = UDim2.new(0, svBoxSize, 0, svBoxSize), Position = UDim2.new(0, padding, 0, padding),
+                   BackgroundColor3 = Color3.new(1,1,1), -- Updated by hue
+                   ClipsDescendants = true, Parent = pickerFrame
+               })
+               Utility.createCorner(SV_Box, 4)
+               local SaturationGradient = Utility.createInstance("UIGradient", {
+                   Name = "Saturation", Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.new(1, 1, 1)), -- White -> Hue Color
+                   Rotation = 90, Parent = SV_Box
+               })
+               local ValueGradient = Utility.createInstance("UIGradient", {
+                   Name = "Value", Color = ColorSequence.new(Color3.new(0, 0, 0, 1), Color3.new(0, 0, 0, 0)), -- Transparent -> Black
+                   Rotation = 0, Parent = SV_Box
+               })
+               local SV_Cursor = Utility.createInstance("Frame", {
+                   Name = "Cursor", Size = UDim2.new(0, 8, 0, 8), Position = UDim2.fromScale(0.5, 0.5), -- Updated later
+                   AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = SelectedTheme.TextColor, BorderSizePixel = 1, BorderColor3 = Color3.new(0,0,0),
+                   ZIndex = 2, Parent = SV_Box
+               })
+               Utility.createCorner(SV_Cursor, 4)
+
+               -- Hue Slider
+               local Hue_Slider = Utility.createInstance("Frame", {
+                   Name = "Hue_Slider", Size = UDim2.new(0, hueSliderWidth, 0, svBoxSize), Position = UDim2.new(0, padding + svBoxSize + padding, 0, padding),
+                   BackgroundColor3 = Color3.new(1,1,1), ClipsDescendants = true, Parent = pickerFrame
+               })
+               Utility.createCorner(Hue_Slider, hueSliderWidth / 2)
+               local Hue_Gradient = Utility.createInstance("UIGradient", {
+                   Name = "Gradient", Rotation = 0, Parent = Hue_Slider,
+                   Color = ColorSequence.new({
+                       ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),   -- Red
+                       ColorSequenceKeypoint.new(1/6, Color3.fromRGB(255, 255, 0)), -- Yellow
+                       ColorSequenceKeypoint.new(2/6, Color3.fromRGB(0, 255, 0)),   -- Lime
+                       ColorSequenceKeypoint.new(3/6, Color3.fromRGB(0, 255, 255)), -- Cyan
+                       ColorSequenceKeypoint.new(4/6, Color3.fromRGB(0, 0, 255)),   -- Blue
+                       ColorSequenceKeypoint.new(5/6, Color3.fromRGB(255, 0, 255)), -- Magenta
+                       ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))    -- Red (wrap)
+                   })
+               })
+               local Hue_Cursor = Utility.createInstance("Frame", {
+                   Name = "Cursor", Size = UDim2.new(1, 4, 0, 4), Position = UDim2.fromScale(0.5, 0), -- Y updated later
+                   AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = SelectedTheme.TextColor, BorderSizePixel = 1, BorderColor3 = Color3.new(0,0,0),
+                   ZIndex = 2, Parent = Hue_Slider
+               })
+               Utility.createCorner(Hue_Cursor, 2)
+
+               -- Hex Input (Optional) - Add below SV box and Hue slider
+               local HexInput = Utility.createInstance("TextBox", {
+                   Name = "HexInput", Size = UDim2.new(1, -(padding*2), 0, 25), Position = UDim2.new(0, padding, 0, padding + svBoxSize + padding),
+                   BackgroundColor3 = SelectedTheme.InputBackground, Font = Enum.Font.Gotham, Text = "", PlaceholderText = "Hex: #FFFFFF",
+                   TextColor3 = SelectedTheme.TextColor, PlaceholderColor3 = SelectedTheme.InputPlaceholder, TextSize = 12, ClearTextOnFocus = false,
+                   Parent = pickerFrame
+               })
+               Utility.createCorner(HexInput, 4)
+               Utility.createStroke(HexInput, SelectedTheme.InputStroke, 1)
+
+               -- Picker Logic
+               local currentH, currentS, currentV = Color3.toHSV(LuminaUI.Flags[flag].Value)
+               local svDragging = false
+               local hueDragging = false
+
+               local function updateColor(newH, newS, newV, triggerCallback, updateHex)
+                   triggerCallback = triggerCallback == nil and true or triggerCallback
+                   updateHex = updateHex == nil and true or updateHex
+
+                   currentH, currentS, newV = newH, newS, newV -- Update state
+                   local newColor = Color3.fromHSV(currentH, currentS, currentV)
+
+                   -- Update Flag and Swatch
+                   LuminaUI.Flags[flag].Value = newColor
+                   ColorSwatch.BackgroundColor3 = newColor
+
+                   -- Update SV Box background (hue part) and Saturation gradient
+                   local hueColor = Color3.fromHSV(currentH, 1, 1)
+                   SV_Box.BackgroundColor3 = hueColor
+                   SaturationGradient.Color = ColorSequence.new(Color3.new(1, 1, 1), hueColor)
+
+                   -- Update Cursors
+                   SV_Cursor.Position = UDim2.fromScale(currentS, 1 - currentV)
+                   Hue_Cursor.Position = UDim2.fromScale(0.5, currentH)
+
+                   -- Update Hex Input
+                   if updateHex then
+                       HexInput.Text = string.format("#%02X%02X%02X", newColor.R * 255, newColor.G * 255, newColor.B * 255)
+                   end
+
+                   -- Trigger Callback
+                   if triggerCallback then
+                       local success, err = pcall(callback, newColor)
+                       if not success then warn("LuminaUI ColorPicker Error:", err) end
+                   end
+               end
+
+               -- Initial update for picker state
+               updateColor(currentH, currentS, currentV, false, true)
+
+               -- SV Box Interaction
+               local svInteract = Utility.createInstance("TextButton", { Name="Interact", Size=UDim2.fromScale(1,1), BackgroundTransparency=1, Text="", ZIndex=1, Parent=SV_Box })
+               local function handleSVInput(input)
+                   local mousePos = input.Position
+                   local boxPos = SV_Box.AbsolutePosition
+                   local boxSize = SV_Box.AbsoluteSize
+                   local relativeX = math.clamp((mousePos.X - boxPos.X) / boxSize.X, 0, 1) -- Saturation
+                   local relativeY = math.clamp((mousePos.Y - boxPos.Y) / boxSize.Y, 0, 1) -- 1 - Value
+                   updateColor(currentH, relativeX, 1 - relativeY)
+               end
+               Utility.Connect(svInteract.InputBegan, function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then svDragging = true; handleSVInput(input); UserInputService.TextSelectionEnabled = false; end end)
+               Utility.Connect(UserInputService.InputEnded, function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 and svDragging then svDragging = false; UserInputService.TextSelectionEnabled = true; end end)
+               Utility.Connect(UserInputService.InputChanged, function(input) if input.UserInputType == Enum.UserInputType.MouseMovement and svDragging then handleSVInput(input) end end)
+
+               -- Hue Slider Interaction
+               local hueInteract = Utility.createInstance("TextButton", { Name="Interact", Size=UDim2.fromScale(1,1), BackgroundTransparency=1, Text="", ZIndex=1, Parent=Hue_Slider })
+               local function handleHueInput(input)
+                   local mouseY = input.Position.Y
+                   local sliderPos = Hue_Slider.AbsolutePosition
+                   local sliderSize = Hue_Slider.AbsoluteSize
+                   local relativeY = math.clamp((mouseY - sliderPos.Y) / sliderSize.Y, 0, 1) -- Hue
+                   updateColor(relativeY, currentS, currentV)
+               end
+               Utility.Connect(hueInteract.InputBegan, function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then hueDragging = true; handleHueInput(input); UserInputService.TextSelectionEnabled = false; end end)
+               Utility.Connect(UserInputService.InputEnded, function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 and hueDragging then hueDragging = false; UserInputService.TextSelectionEnabled = true; end end)
+               Utility.Connect(UserInputService.InputChanged, function(input) if input.UserInputType == Enum.UserInputType.MouseMovement and hueDragging then handleHueInput(input) end end)
+
+               -- Hex Input Interaction
+               Utility.Connect(HexInput.FocusLost, function(enterPressed)
+                   if enterPressed then
+                       local text = HexInput.Text:gsub("#", "")
+                       if text:match("^[0-9a-fA-F]{6}$") then
+                           local r = tonumber("0x"..text:sub(1,2)) / 255
+                           local g = tonumber("0x"..text:sub(3,4)) / 255
+                           local b = tonumber("0x"..text:sub(5,6)) / 255
+                           local newColor = Color3.new(r, g, b)
+                           local h, s, v = Color3.toHSV(newColor)
+                           updateColor(h, s, v, true, false) -- Update picker from hex, don't re-update hex box
+                       else
+                           -- Revert to current color if invalid hex
+                           local currentColor = LuminaUI.Flags[flag].Value
+                           HexInput.Text = string.format("#%02X%02X%02X", currentColor.R * 255, currentColor.G * 255, currentColor.B * 255)
+                       end
+                   end
+               end)
+
+               -- Animate picker open
+               local pickerTween = TweenService:Create(pickerFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(0, pickerWidth, 0, pickerHeight), BackgroundTransparency = 0 })
+               pickerTween:Play()
            end
-       else
-           warn("LuminaUI: Invalid value for SetValue on ColorPicker '"..flag.."'. Expected Color3.")
-       end
-   end,
-   GetValue = function()
-       return LuminaUI.Flags[flag].Value
-   end
-}
-Tab.Elements[flag] = ColorPickerAPI -- Store API under flag name
-
-return ColorPickerAPI
-end
-
--- CreateSection (Container for grouping elements)
-function Tab:CreateSection(options)
-options = options or {}
-local sectionName = options.Name or "Section"
-local defaultOpen = options.DefaultOpen == nil and true or options.DefaultOpen -- Default to open
-
-local sectionOpen = defaultOpen
-local contentFrame = nil
-local arrowIcon = nil
-
-local updateTheme = function(instance)
-   local header = instance:FindFirstChild("Header")
-   local arrow = header and header:FindFirstChild("Arrow")
-   local label = header and header:FindFirstChild("Label")
-   local content = instance:FindFirstChild("Content")
-
-   instance.BackgroundColor3 = SelectedTheme.SectionBackground
-   if header then header.BackgroundColor3 = SelectedTheme.ElementBackground -- Header distinct?
-       local headerStroke = header:FindFirstChildOfClass("UIStroke")
-       if headerStroke then headerStroke.Color = SelectedTheme.ElementStroke end
-   end
-   if arrow then arrow.ImageColor3 = SelectedTheme.TextColor end
-   if label then label.TextColor3 = SelectedTheme.TextColor end
-   if content then
-       -- Content background matches section background
-       content.BackgroundColor3 = SelectedTheme.SectionBackground
-   end
-end
-
-local SectionFrame = Utility.createInstance("Frame", {
-   Name = "Section_" .. sectionName:gsub("%s+", "_"), Size = UDim2.new(1, 0, 0, 30), -- Initial height for header
-   BackgroundColor3 = SelectedTheme.SectionBackground, BackgroundTransparency = 0.2, ClipsDescendants = true,
-   LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
-}, "Section", updateTheme) -- Track Section
-Utility.createCorner(SectionFrame, 4)
--- No main stroke, rely on header/content visuals
-
--- Header Frame
-local HeaderFrame = Utility.createInstance("Frame", {
-   Name = "Header", Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = SelectedTheme.ElementBackground, Parent = SectionFrame
-})
--- Utility.createCorner(HeaderFrame, 4) -- Apply corner to main frame instead
-Utility.createStroke(HeaderFrame, SelectedTheme.ElementStroke, 1) -- Stroke on header
-
--- Arrow Icon
-arrowIcon = Utility.createInstance("ImageLabel", {
-   Name = "Arrow", Size = UDim2.new(0, 12, 0, 12), Position = UDim2.new(0, 10, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
-   BackgroundTransparency = 1, Image = "rbxassetid://6035048680", ImageColor3 = SelectedTheme.TextColor, Rotation = sectionOpen and 90 or 0, Parent = HeaderFrame
-})
-
--- Label
-local SectionLabel = Utility.createInstance("TextLabel", {
-   Name = "Label", Size = UDim2.new(1, -30, 1, 0), Position = UDim2.new(0, 30, 0, 0), BackgroundTransparency = 1,
-   Font = Enum.Font.GothamBold, Text = sectionName, TextColor3 = SelectedTheme.TextColor, TextSize = 13,
-   TextXAlignment = Enum.TextXAlignment.Left, Parent = HeaderFrame
-})
-
--- Header Interaction
-local HeaderInteract = Utility.createInstance("TextButton", {
-   Name = "Interact", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = HeaderFrame
-})
-
--- Content Frame (holds child elements)
-contentFrame = Utility.createInstance("Frame", {
-   Name = "Content", Size = UDim2.new(1, 0, 0, 0), -- Height calculated later
-   Position = UDim2.new(0, 0, 0, 30), BackgroundColor3 = SelectedTheme.SectionBackground, BackgroundTransparency = 0,
-   ClipsDescendants = true, Visible = sectionOpen, Parent = SectionFrame
-})
-local contentLayout = Utility.createInstance("UIListLayout", {
-   Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder, Parent = contentFrame
-})
-local contentPadding = Utility.createInstance("UIPadding", {
-   PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
-   PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = contentFrame
-})
-
--- Function to toggle section visibility and animate
-local contentHeight = 0 -- Store calculated content height
-   -- ... inside CreateSection function ...
-   local function toggleSection()
-    sectionOpen = not sectionOpen
-    contentFrame.Visible = true -- Make visible before animation starts
-
-    local targetRotation = sectionOpen and 90 or 0
-    local targetHeight = sectionOpen and contentHeight or 0
-    -- Calculate target height including padding
-    local targetFrameHeight = sectionOpen and (30 + contentHeight + contentPadding.PaddingTop.Offset + contentPadding.PaddingBottom.Offset) or 30
-
-    local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-    TweenService:Create(arrowIcon, tweenInfo, { Rotation = targetRotation }):Play()
-    TweenService:Create(contentFrame, tweenInfo, { Size = UDim2.new(1, 0, 0, targetHeight) }):Play()
-    local frameTween = TweenService:Create(SectionFrame, tweenInfo, { Size = UDim2.new(1, 0, 0, targetFrameHeight) })
-    frameTween:Play()
-
-    Utility.Connect(frameTween.Completed, function()
-        if not sectionOpen then
-            contentFrame.Visible = false -- Hide after collapsing
         end
-        -- Force layout update on parent tab page after animation
-        if TabPage and TabPage.Parent and ElementsListLayout and ElementsListLayout.Parent then
-            local currentCanvasSize = TabPage.CanvasSize
-            local paddingHeight = ElementsPadding.PaddingTop.Offset + ElementsPadding.PaddingBottom.Offset
-            TabPage.CanvasSize = UDim2.new(0,0,0, ElementsListLayout.AbsoluteContentSize.Y + paddingHeight)
+
+        -- Effects & Callback for swatch button
+        Utility.Connect(ColorSwatch.MouseEnter, function() if tooltip then Utility.showTooltip(tooltip) end end)
+        Utility.Connect(ColorSwatch.MouseLeave, function() if tooltip then Utility.hideTooltip() end end)
+        Utility.Connect(ColorSwatch.MouseButton1Click, function()
+           togglePickerPopup()
+        end)
+
+        -- Close picker if clicked outside
+        local clickOutsidePickerConnection = Utility.Connect(UserInputService.InputBegan, function(input)
+            if pickerOpen and pickerFrame and pickerFrame.Parent and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+                local mousePos = input.Position
+                local framePos = PickerFrame.AbsolutePosition
+                local frameSize = PickerFrame.AbsoluteSize
+                local popupPos = pickerFrame.AbsolutePosition
+                local popupSize = pickerFrame.AbsoluteSize
+
+                -- Check if click is outside both the main frame and the popup
+                local inFrame = mousePos.X >= framePos.X and mousePos.X <= framePos.X + frameSize.X and mousePos.Y >= framePos.Y and mousePos.Y <= framePos.Y + frameSize.Y
+                local inPopup = mousePos.X >= popupPos.X and mousePos.X <= popupPos.X + popupSize.X and mousePos.Y >= popupPos.Y and mousePos.Y <= popupPos.Y + popupSize.Y
+
+                if not inFrame and not inPopup then
+                    togglePickerPopup(true) -- Force close
+                end
+            end
+        end)
+        Utility.storeConnection(PickerFrame, clickOutsidePickerConnection)
+
+        -- API to update color picker state externally
+        local ColorPickerAPI = {
+           Instance = PickerFrame,
+           Type = "ColorPicker",
+           Flag = flag,
+           SetValue = function(newColor)
+               if typeof(newColor) == "Color3" then
+                   local h, s, v = Color3.toHSV(newColor)
+                   if pickerOpen then
+                       updateColor(h, s, v, false) -- Update picker visuals if open, don't trigger callback
+                   else
+                       -- Just update flag and swatch if picker is closed
+                       LuminaUI.Flags[flag].Value = newColor
+                       ColorSwatch.BackgroundColor3 = newColor
+                   end
+               else
+                   warn("LuminaUI: Invalid value for SetValue on ColorPicker '"..flag.."'. Expected Color3.")
+               end
+           end,
+           GetValue = function()
+               return LuminaUI.Flags[flag].Value
+           end
+        }
+        Tab.Elements[flag] = ColorPickerAPI -- Store API under flag name
+
+        return ColorPickerAPI
         end
-    end)
- end
 
- Utility.Connect(HeaderInteract.MouseButton1Click, toggleSection)
+        -- CreateSection (Container for grouping elements)
+        function Tab:CreateSection(options)
+        options = options or {}
+        local sectionName = options.Name or "Section"
+        local defaultOpen = options.DefaultOpen == nil and true or options.DefaultOpen -- Default to open
 
- -- Function to recalculate content height (call after adding/removing elements)
- local function recalculateContentHeight()
-    -- Use AbsoluteContentSize from the layout
-    contentHeight = contentLayout.AbsoluteContentSize.Y
-    if sectionOpen then
-        -- Update frame sizes immediately if already open
-        local newFrameHeight = 30 + contentHeight + contentPadding.PaddingTop.Offset + contentPadding.PaddingBottom.Offset
-        contentFrame.Size = UDim2.new(1, 0, 0, contentHeight)
-        SectionFrame.Size = UDim2.new(1, 0, 0, newFrameHeight)
-    end
- end
+        local sectionOpen = defaultOpen
+        local contentFrame = nil
+        local arrowIcon = nil
 
- -- Connect to layout changes to auto-recalculate
- Utility.Connect(contentLayout:GetPropertyChangedSignal("AbsoluteContentSize"), recalculateContentHeight)
- -- Also connect to child added/removed for robustness
- Utility.Connect(contentFrame.ChildAdded, function(child) task.wait(); recalculateContentHeight() end) -- Wait a frame
- Utility.Connect(contentFrame.ChildRemoved, function(child) task.wait(); recalculateContentHeight() end) -- Wait a frame
+        local updateTheme = function(instance)
+           local header = instance:FindFirstChild("Header")
+           local arrow = header and header:FindFirstChild("Arrow")
+           local label = header and header:FindFirstChild("Label")
+           local content = instance:FindFirstChild("Content")
 
+           instance.BackgroundColor3 = SelectedTheme.SectionBackground
+           if header then header.BackgroundColor3 = SelectedTheme.ElementBackground -- Header distinct?
+               local headerStroke = header:FindFirstChildOfClass("UIStroke")
+               if headerStroke then headerStroke.Color = SelectedTheme.ElementStroke end
+           end
+           if arrow then arrow.ImageColor3 = SelectedTheme.TextColor end
+           if label then label.TextColor3 = SelectedTheme.TextColor end
+           if content then
+               -- Content background matches section background
+               content.BackgroundColor3 = SelectedTheme.SectionBackground
+           end
+        end
 
- -- Section API (allows adding elements *inside* the section)
- local SectionAPI = {
-    Instance = SectionFrame,
-    Type = "Section",
-    Container = contentFrame, -- Expose content frame
-    Layout = contentLayout, -- Expose layout
-    Recalculate = recalculateContentHeight, -- Expose recalculate function
-    Toggle = toggleSection, -- Expose toggle function
-    IsOpen = function() return sectionOpen end,
-    -- Re-implement element creation methods, parenting to contentFrame
-    CreateButton = function(opts) opts.Parent = contentFrame; return Tab:CreateButton(opts) end,
-    CreateToggle = function(opts) opts.Parent = contentFrame; return Tab:CreateToggle(opts) end,
-    CreateSlider = function(opts) opts.Parent = contentFrame; return Tab:CreateSlider(opts) end,
-    CreateDropdown = function(opts) opts.Parent = contentFrame; return Tab:CreateDropdown(opts) end,
-    CreateTextbox = function(opts) opts.Parent = contentFrame; return Tab:CreateTextbox(opts) end,
-    CreateLabel = function(opts) opts.Parent = contentFrame; return Tab:CreateLabel(opts) end,
-    CreateDivider = function(opts) opts.Parent = contentFrame; return Tab:CreateDivider(opts) end,
-    CreateKeybind = function(opts) opts.Parent = contentFrame; return Tab:CreateKeybind(opts) end,
-    CreateColorPicker = function(opts) opts.Parent = contentFrame; return Tab:CreateColorPicker(opts) end,
-    -- Note: Cannot create nested sections this way easily, would need adjustments
- }
+        local SectionFrame = Utility.createInstance("Frame", {
+           Name = "Section_" .. sectionName:gsub("%s+", "_"), Size = UDim2.new(1, 0, 0, 30), -- Initial height for header
+           BackgroundColor3 = SelectedTheme.SectionBackground, BackgroundTransparency = 0.2, ClipsDescendants = true,
+           LayoutOrder = #TabPage:GetChildren() + 1, Parent = TabPage
+        }, "Section", updateTheme) -- Track Section
+        Utility.createCorner(SectionFrame, 4)
+        -- No main stroke, rely on header/content visuals
 
- -- Need to override the Parent property in options for elements added via SectionAPI
- -- This wrapper ensures elements added directly to the Tab go to Tab.Page,
- -- while elements added via SectionAPI go to SectionAPI.Container (contentFrame).
- local function wrapCreateFunction(originalFunc)
-     return function(apiSelf, options) -- apiSelf can be Tab or SectionAPI
-         options = options or {}
-         -- If called on SectionAPI, parent is Container, otherwise default to Tab.Page
-         options.Parent = (apiSelf == SectionAPI and SectionAPI.Container) or options.Parent or Tab.Page
-         return originalFunc(Tab, options) -- Always call the original Tab method
-     end
- end
+        -- Header Frame
+        local HeaderFrame = Utility.createInstance("Frame", {
+           Name = "Header", Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = SelectedTheme.ElementBackground, Parent = SectionFrame
+        })
+        -- Utility.createCorner(HeaderFrame, 4) -- Apply corner to main frame instead
+        Utility.createStroke(HeaderFrame, SelectedTheme.ElementStroke, 1) -- Stroke on header
 
- -- Wrap functions for the SectionAPI specifically
- SectionAPI.CreateButton = wrapCreateFunction(Tab.CreateButton)
- SectionAPI.CreateToggle = wrapCreateFunction(Tab.CreateToggle)
- SectionAPI.CreateSlider = wrapCreateFunction(Tab.CreateSlider)
- SectionAPI.CreateDropdown = wrapCreateFunction(Tab.CreateDropdown)
- SectionAPI.CreateTextbox = wrapCreateFunction(Tab.CreateTextbox)
- SectionAPI.CreateLabel = wrapCreateFunction(Tab.CreateLabel)
- SectionAPI.CreateDivider = wrapCreateFunction(Tab.CreateDivider)
- SectionAPI.CreateKeybind = wrapCreateFunction(Tab.CreateKeybind)
- SectionAPI.CreateColorPicker = wrapCreateFunction(Tab.CreateColorPicker)
- -- Section creation doesn't need wrapping as it's always parented to TabPage
+        -- Arrow Icon
+        arrowIcon = Utility.createInstance("ImageLabel", {
+           Name = "Arrow", Size = UDim2.new(0, 12, 0, 12), Position = UDim2.new(0, 10, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
+           BackgroundTransparency = 1, Image = "rbxassetid://6035048680", ImageColor3 = SelectedTheme.TextColor, Rotation = sectionOpen and 90 or 0, Parent = HeaderFrame
+        })
 
- Tab.Elements["Section_" .. sectionName:gsub("%s+", "_")] = SectionAPI -- Store API
+        -- Label
+        local SectionLabel = Utility.createInstance("TextLabel", {
+           Name = "Label", Size = UDim2.new(1, -30, 1, 0), Position = UDim2.new(0, 30, 0, 0), BackgroundTransparency = 1,
+           Font = Enum.Font.GothamBold, Text = sectionName, TextColor3 = SelectedTheme.TextColor, TextSize = 13,
+           TextXAlignment = Enum.TextXAlignment.Left, Parent = HeaderFrame
+        })
 
- -- Initial calculation after a frame to allow layout to settle
- task.wait()
- recalculateContentHeight()
+        -- Header Interaction
+        local HeaderInteract = Utility.createInstance("TextButton", {
+           Name = "Interact", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = HeaderFrame
+        })
 
- return SectionAPI
-end
+        -- Content Frame (holds child elements)
+        contentFrame = Utility.createInstance("Frame", {
+           Name = "Content", Size = UDim2.new(1, 0, 0, 0), -- Height calculated later
+           Position = UDim2.new(0, 0, 0, 30), BackgroundColor3 = SelectedTheme.SectionBackground, BackgroundTransparency = 0,
+           ClipsDescendants = true, Visible = sectionOpen, Parent = SectionFrame
+        })
+        local contentLayout = Utility.createInstance("UIListLayout", {
+           Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder, Parent = contentFrame
+        })
+        local contentPadding = Utility.createInstance("UIPadding", {
+           PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
+           PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = contentFrame
+        })
 
+        -- Function to toggle section visibility and animate
+        local contentHeight = 0 -- Store calculated content height
+           -- ... inside CreateSection function ...
+           local function toggleSection()
+            sectionOpen = not sectionOpen
+            contentFrame.Visible = true -- Make visible before animation starts
 
-         -- ========================================================================
-         -- Element Creation Methods End Here
-         -- ========================================================================
+            local targetRotation = sectionOpen and 90 or 0
+            local targetHeight = sectionOpen and contentHeight or 0
+            -- Calculate target height including padding
+            local targetFrameHeight = sectionOpen and (30 + contentHeight + contentPadding.PaddingTop.Offset + contentPadding.PaddingBottom.Offset) or 30
 
-         -- Select this tab if it's the first one created
-         if not activePage then
-             Window:SelectTab(tabId)
+            local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+            TweenService:Create(arrowIcon, tweenInfo, { Rotation = targetRotation }):Play()
+            TweenService:Create(contentFrame, tweenInfo, { Size = UDim2.new(1, 0, 0, targetHeight) }):Play()
+            local frameTween = TweenService:Create(SectionFrame, tweenInfo, { Size = UDim2.new(1, 0, 0, targetFrameHeight) })
+            frameTween:Play()
+
+            Utility.Connect(frameTween.Completed, function()
+                if not sectionOpen then
+                    contentFrame.Visible = false -- Hide after collapsing
+                end
+                -- Force layout update on parent tab page after animation
+                if TabPage and TabPage.Parent and ElementsListLayout and ElementsListLayout.Parent then
+                    local currentCanvasSize = TabPage.CanvasSize
+                    local paddingHeight = ElementsPadding.PaddingTop.Offset + ElementsPadding.PaddingBottom.Offset
+                    TabPage.CanvasSize = UDim2.new(0,0,0, ElementsListLayout.AbsoluteContentSize.Y + paddingHeight)
+                end
+            end)
          end
 
-         return Tab -- Return the Tab object
-     end -- End of Window:CreateTab
+         Utility.Connect(HeaderInteract.MouseButton1Click, toggleSection)
 
-     -- Return the Window object
-     return Window
- end -- End of LuminaUI:CreateWindow
+         -- Function to recalculate content height (call after adding/removing elements)
+         local function recalculateContentHeight()
+            -- Use AbsoluteContentSize from the layout
+            contentHeight = contentLayout.AbsoluteContentSize.Y
+            if sectionOpen then
+                -- Update frame sizes immediately if already open
+                local newFrameHeight = 30 + contentHeight + contentPadding.PaddingTop.Offset + contentPadding.PaddingBottom.Offset
+                contentFrame.Size = UDim2.new(1, 0, 0, contentHeight)
+                SectionFrame.Size = UDim2.new(1, 0, 0, newFrameHeight)
+            end
+         end
 
- -- Cleanup function (Optional but good practice)
- function LuminaUI:Destroy()
-     if Library and Library.Parent then
-         -- Save config before destroying if enabled
-         -- Need access to settings here, might need to store them in LuminaUI instance
-         -- if settings and settings.ConfigurationSaving and settings.ConfigurationSaving.Enabled then
-         --     Utility.saveConfig(Library:FindFirstChild("MainFrame"), settings)
-         -- end
-         Utility.destroyInstance(Library)
-     end
-     -- Clear all internal state
-     Library = nil
-     LuminaUI._Instances = {}
-     LuminaUI._Connections = {}
-     LuminaUI._Keybinds = {}
-     LuminaUI.Flags = {}
-     LuminaUI.Tabs = {}
-     if LuminaUI._KeybindListener then LuminaUI._KeybindListener:Disconnect(); LuminaUI._KeybindListener = nil end
-     if LuminaUI._TooltipUpdateConnection then LuminaUI._TooltipUpdateConnection:Disconnect(); LuminaUI._TooltipUpdateConnection = nil end
-     if LuminaUI._DragMoveConnection then LuminaUI._DragMoveConnection:Disconnect(); LuminaUI._DragMoveConnection = nil end
-     -- Clear instance pool? Maybe not, could be reused by another LuminaUI instance.
- end
+         -- Connect to layout changes to auto-recalculate
+         Utility.Connect(contentLayout:GetPropertyChangedSignal("AbsoluteContentSize"), recalculateContentHeight)
+         -- Also connect to child added/removed for robustness
+         Utility.Connect(contentFrame.ChildAdded, function(child) task.wait(); recalculateContentHeight() end) -- Wait a frame
+         Utility.Connect(contentFrame.ChildRemoved, function(child) task.wait(); recalculateContentHeight() end) -- Wait a frame
 
- -- Return the main library table
- return LuminaUI
+
+         -- Section API (allows adding elements *inside* the section)
+         local SectionAPI = {
+            Instance = SectionFrame,
+            Type = "Section",
+            Container = contentFrame, -- Expose content frame
+            Layout = contentLayout, -- Expose layout
+            Recalculate = recalculateContentHeight, -- Expose recalculate function
+            Toggle = toggleSection, -- Expose toggle function
+            IsOpen = function() return sectionOpen end,
+            -- Re-implement element creation methods, parenting to contentFrame
+            CreateButton = function(opts) opts.Parent = contentFrame; return Tab:CreateButton(opts) end,
+            CreateToggle = function(opts) opts.Parent = contentFrame; return Tab:CreateToggle(opts) end,
+            CreateSlider = function(opts) opts.Parent = contentFrame; return Tab:CreateSlider(opts) end,
+            CreateDropdown = function(opts) opts.Parent = contentFrame; return Tab:CreateDropdown(opts) end,
+            CreateTextbox = function(opts) opts.Parent = contentFrame; return Tab:CreateTextbox(opts) end,
+            CreateLabel = function(opts) opts.Parent = contentFrame; return Tab:CreateLabel(opts) end,
+            CreateDivider = function(opts) opts.Parent = contentFrame; return Tab:CreateDivider(opts) end,
+            CreateKeybind = function(opts) opts.Parent = contentFrame; return Tab:CreateKeybind(opts) end,
+            CreateColorPicker = function(opts) opts.Parent = contentFrame; return Tab:CreateColorPicker(opts) end,
+            -- Note: Cannot create nested sections this way easily, would need adjustments
+         }
+
+         -- Need to override the Parent property in options for elements added via SectionAPI
+         -- This wrapper ensures elements added directly to the Tab go to Tab.Page,
+         -- while elements added via SectionAPI go to SectionAPI.Container (contentFrame).
+         local function wrapCreateFunction(originalFunc)
+             return function(apiSelf, options) -- apiSelf can be Tab or SectionAPI
+                 options = options or {}
+                 -- If called on SectionAPI, parent is Container, otherwise default to Tab.Page
+                 options.Parent = (apiSelf == SectionAPI and SectionAPI.Container) or options.Parent or Tab.Page
+                 return originalFunc(Tab, options) -- Always call the original Tab method
+             end
+         end
+
+         -- Wrap functions for the SectionAPI specifically
+         SectionAPI.CreateButton = wrapCreateFunction(Tab.CreateButton)
+         SectionAPI.CreateToggle = wrapCreateFunction(Tab.CreateToggle)
+         SectionAPI.CreateSlider = wrapCreateFunction(Tab.CreateSlider)
+         SectionAPI.CreateDropdown = wrapCreateFunction(Tab.CreateDropdown)
+         SectionAPI.CreateTextbox = wrapCreateFunction(Tab.CreateTextbox)
+         SectionAPI.CreateLabel = wrapCreateFunction(Tab.CreateLabel)
+         SectionAPI.CreateDivider = wrapCreateFunction(Tab.CreateDivider)
+         SectionAPI.CreateKeybind = wrapCreateFunction(Tab.CreateKeybind)
+         SectionAPI.CreateColorPicker = wrapCreateFunction(Tab.CreateColorPicker)
+         -- Section creation doesn't need wrapping as it's always parented to TabPage
+
+         Tab.Elements["Section_" .. sectionName:gsub("%s+", "_")] = SectionAPI -- Store API
+
+         -- Initial calculation after a frame to allow layout to settle
+         task.wait()
+         recalculateContentHeight()
+
+         return SectionAPI
+        end
+
+
+                 -- ========================================================================
+                 -- Element Creation Methods End Here
+                 -- ========================================================================
+
+                 -- Select this tab if it's the first one created
+                 if not activePage then
+                     Window:SelectTab(tabId)
+                 end
+
+                 return Tab -- Return the Tab object
+             end -- End of Window:CreateTab
+
+             -- Fade out loading screen after a short delay
+             task.wait(0.5) -- Wait briefly for UI to render potentially
+             if LoadingScreen and LoadingScreen.Parent then
+                 local fadeOutInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+                 local fadeTween = TweenService:Create(LoadingFrame, fadeOutInfo, { BackgroundTransparency = 1 })
+                 fadeTween:Play()
+                 Utility.Connect(fadeTween.Completed, function()
+                     rotationTween:Cancel() -- Stop the spinner animation
+                     Utility.destroyInstance(LoadingScreen) -- Clean up loading screen
+                 end)
+             end
+
+             -- Return the Window object
+             return Window
+         end -- End of LuminaUI:CreateWindow
+
+         -- Cleanup function (Optional but good practice)
+         function LuminaUI:Destroy()
+             if Library and Library.Parent then
+                 -- Save config before destroying if enabled and not already saved by CloseButton click
+                 -- Check if settings were stored or pass them if available in this scope
+                 -- Example: if self.settings and self.settings.ConfigurationSaving... Utility.saveConfig(...)
+
+                 Utility.destroyInstance(Library) -- Use pooled destroy for the ScreenGui
+             end
+             -- Clear all internal state
+             Library = nil
+             LuminaUI._Instances = {}
+             LuminaUI._Connections = {}
+             LuminaUI._Keybinds = {}
+             LuminaUI.Flags = {}
+             LuminaUI.Tabs = {}
+             if LuminaUI._KeybindListener then LuminaUI._KeybindListener:Disconnect(); LuminaUI._KeybindListener = nil end
+             if LuminaUI._TooltipUpdateConnection then LuminaUI._TooltipUpdateConnection:Disconnect(); LuminaUI._TooltipUpdateConnection = nil end
+             if LuminaUI._DragMoveConnection then LuminaUI._DragMoveConnection:Disconnect(); LuminaUI._DragMoveConnection = nil end
+             -- Clear instance pool? Maybe not, could be reused by another LuminaUI instance.
+             print("LuminaUI Destroyed") -- Optional confirmation
+         end
+
+         -- Return the main library table
+         return LuminaUI
