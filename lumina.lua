@@ -627,7 +627,7 @@ function Utility.saveConfig(windowInstance, settings)
         Elements = {}
     }
 
-    for flag, elementData in pairs(LuminaUI.Flags) {
+    for flag, elementData in pairs(LuminaUI.Flags) do
         local value = elementData.Value
         local valueType = type(value)
         -- Only save if value is serializable (basic types + Color3)
@@ -641,6 +641,22 @@ function Utility.saveConfig(windowInstance, settings)
                 Type = elementData.Type,
                 Value = { R = value.R, G = value.G, B = value.B } -- Save Color3 components
             }
+        elseif valueType == "table" then
+             if elementData.Type == "Keybind" and value.Key and value.Modifiers then
+                 local keyToSave = value.Key
+                 if type(keyToSave) == "EnumItem" then
+                     keyToSave = keyToSave.Name -- Save Enum name as string
+                 end
+                 data.Elements[flag] = {
+                     Type = elementData.Type,
+                     Value = { Key = keyToSave, Modifiers = value.Modifiers }
+                 }
+             elseif elementData.Type == "Dropdown" then
+                 data.Elements[flag] = {
+                     Type = elementData.Type,
+                     Value = value -- Save the table directly
+                 }
+             end
         end
     end
 
