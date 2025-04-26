@@ -325,7 +325,7 @@ do
             TextSize = 13,
             TextWrapped = true,
             TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = Enum.TextYAlignment.Top, -- Use Top for wrapping
+            TextYAlignment = Enum.TextXAlignment.Top, -- Use Top for wrapping
             ZIndex = 1001,
             Parent = tooltipInstance
         })
@@ -1152,7 +1152,13 @@ end
 
 local function _createElementsContainer(parent)
     local elementsContainer = Utility.createInstance("Frame", {
-        Name = "ElementsContainer", Size = UDim2.new(1, -140, 1, 0), Position = UDim2.new(0, 140, 0, 0), BackgroundTransparency = 1, ClipsDescendants = true, Parent = parent
+        Name = "ElementsContainer",
+        Size = UDim2.new(1, -140, 1, 0),
+        Position = UDim2.new(0, 140, 0, 0),
+        BackgroundTransparency = 1,
+        ClipsDescendants = true,
+        Parent = parent,
+        ZIndex = 2 -- Explicitly set ZIndex higher than contentContainer (default 1)
     })
 
     local elementsPageFolder = Utility.createInstance("Folder", { Name = "Pages", Parent = elementsContainer })
@@ -1686,7 +1692,15 @@ function LuminaUI:CreateWindow(settings)
 
         -- Create Page
         local tabPage = Utility.createInstance("ScrollingFrame", {
-            Name = tabName, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0, CanvasSize = UDim2.new(0, 0, 0, 0), Visible = false, ScrollingDirection = Enum.ScrollingDirection.Y, Parent = self._elementsPageFolder
+            Name = tabName,
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            Visible = false,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            Parent = self._elementsPageFolder,
+            ZIndex = 3 -- Explicitly set ZIndex higher than elementsContainer
         })
         Utility.manageConnections(tabPage) -- Manage page connections
 
