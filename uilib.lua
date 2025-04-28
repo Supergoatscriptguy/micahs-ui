@@ -96,30 +96,28 @@ end
 
 -- Applies basic theme properties (can be expanded)
 local function ApplyThemeStyle(guiObject, elementType)
-    -- Example: Apply corner radius universally if applicable
-    if guiObject:FindFirstChildWhichIsA("UICorner") then
-        guiObject.UICorner.CornerRadius = Starlight.Theme.CornerRadius
-    elseif elementType ~= "Window" and elementType ~= "TitleBar" then -- Don't double-round window/title
-         if not guiObject:FindFirstChild("UICorner") then
-             local corner = Instance.new("UICorner")
-             corner.CornerRadius = Starlight.Theme.CornerRadius
-             corner.Parent = guiObject
-         end
+    -- Find or create UICorner
+    local corner = guiObject:FindFirstChildWhichIsA("UICorner")
+    if not corner and elementType ~= "Window" and elementType ~= "TitleBar" then -- Avoid double-creating for window/title if created explicitly
+        corner = Instance.new("UICorner")
+        corner.Parent = guiObject
+    end
+    -- Apply corner radius if corner exists
+    if corner then
+        corner.CornerRadius = Starlight.Theme.CornerRadius -- Default radius
     end
 
-    -- Example: Apply stroke universally if applicable
-    if guiObject:FindFirstChildWhichIsA("UIStroke") then
-        guiObject.UIStroke.Color = Starlight.Theme.Stroke
-        guiObject.UIStroke.Thickness = 1
-        guiObject.UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    elseif elementType ~= "Window" and elementType ~= "TitleBar" and elementType ~= "TabButton" then -- Avoid double strokes
-        if not guiObject:FindFirstChild("UIStroke") then
-            local stroke = Instance.new("UIStroke")
-            stroke.Color = Starlight.Theme.Stroke
-            stroke.Thickness = 1
-            stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-            stroke.Parent = guiObject
-        end
+    -- Find or create UIStroke
+    local stroke = guiObject:FindFirstChildWhichIsA("UIStroke")
+    if not stroke and elementType ~= "Window" and elementType ~= "TitleBar" and elementType ~= "TabButton" then -- Avoid double strokes
+        stroke = Instance.new("UIStroke")
+        stroke.Parent = guiObject
+    end
+    -- Apply stroke style if stroke exists
+    if stroke then
+        stroke.Color = Starlight.Theme.Stroke
+        stroke.Thickness = 1
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     end
 
     -- Apply text styles
@@ -136,38 +134,70 @@ local function ApplyThemeStyle(guiObject, elementType)
     if elementType == "Window" then
         guiObject.BackgroundColor3 = Starlight.Theme.Background
         guiObject.BorderSizePixel = 0
-        if guiObject:FindFirstChildWhichIsA("UICorner") then
-             guiObject.UICorner.CornerRadius = Starlight.Theme.CornerRadius -- Ensure window uses main radius
+        -- Ensure window corner radius is set (corner should exist now)
+        local windowCorner = guiObject:FindFirstChildWhichIsA("UICorner")
+        if windowCorner then
+             windowCorner.CornerRadius = Starlight.Theme.CornerRadius -- Ensure main window radius
         end
     elseif elementType == "TitleBar" then
         guiObject.BackgroundColor3 = Starlight.Theme.Secondary -- Slightly different title bar
         guiObject.BorderSizePixel = 0
+        -- Title bar doesn't usually need its own corner if window has one and ClipsDescendants=true
+        local titleCorner = guiObject:FindFirstChildWhichIsA("UICorner")
+        if titleCorner then titleCorner:Destroy() end -- Remove if exists
+        local titleStroke = guiObject:FindFirstChildWhichIsA("UIStroke")
+        if titleStroke then titleStroke:Destroy() end -- Remove if exists
     elseif elementType == "Button" then
         guiObject.BackgroundColor3 = Starlight.Theme.Primary
         guiObject.TextColor3 = Starlight.Theme.Text -- Ensure text is readable on primary
-        if guiObject:FindFirstChildWhichIsA("UIStroke") then guiObject.UIStroke:Destroy() end -- Buttons usually don't need a stroke
+        -- Ensure buttons don't get a stroke from the universal logic
+        local btnStroke = guiObject:FindFirstChildWhichIsA("UIStroke")
+        if btnStroke then btnStroke:Destroy() end
+        -- Ensure button corner uses main radius
+        local btnCorner = guiObject:FindFirstChildWhichIsA("UICorner")
+        if btnCorner then btnCorner.CornerRadius = Starlight.Theme.CornerRadius end
+
     elseif elementType == "TabButton" then
          guiObject.BackgroundColor3 = Starlight.Theme.Secondary
          guiObject.BorderSizePixel = 0
-         if guiObject:FindFirstChildWhichIsA("UICorner") then guiObject.UICorner.CornerRadius = Starlight.Theme.SmallCornerRadius end
-         if guiObject:FindFirstChildWhichIsA("UIStroke") then guiObject.UIStroke.Transparency = 1 end -- Hide stroke by default
+         -- Ensure tab button corner uses small radius
+         local tabCorner = guiObject:FindFirstChildWhichIsA("UICorner")
+         if tabCorner then tabCorner.CornerRadius = Starlight.Theme.SmallCornerRadius end
+         -- Hide stroke by default
+         local tabStroke = guiObject:FindFirstChildWhichIsA("UIStroke")
+         if tabStroke then tabStroke.Transparency = 1 end
     elseif elementType == "TabContent" then
          guiObject.BackgroundColor3 = Starlight.Theme.Background -- Match window background
          guiObject.BorderSizePixel = 0
+         -- Content frame shouldn't need corner/stroke usually
+         local contentCorner = guiObject:FindFirstChildWhichIsA("UICorner")
+         if contentCorner then contentCorner:Destroy() end
+         local contentStroke = guiObject:FindFirstChildWhichIsA("UIStroke")
+         if contentStroke then contentStroke:Destroy() end
+    elseif elementType == "ListFrame" then -- Style for dropdown list
+        guiObject.BackgroundColor3 = Starlight.Theme.Secondary
+        local listCorner = guiObject:FindFirstChildWhichIsA("UICorner") or Instance.new("UICorner")
+        listCorner.CornerRadius = Starlight.Theme.SmallCornerRadius
+        listCorner.Parent = guiObject
+        local listStroke = guiObject:FindFirstChildWhichIsA("UIStroke") or Instance.new("UIStroke")
+        listStroke.Color = Starlight.Theme.Stroke
+        listStroke.Thickness = 1
+        listStroke.Parent = guiObject
+    elseif elementType == "DropdownOption" then -- Style for dropdown options
+        guiObject.Font = Starlight.Theme.Font
+        guiObject.TextSize = Starlight.Theme.TextSizeSmall
+        guiObject.TextColor3 = Starlight.Theme.Text
+        -- No corner or stroke needed usually
+        local ddOptCorner = guiObject:FindFirstChildWhichIsA("UICorner")
+        if ddOptCorner then ddOptCorner:Destroy() end
+        local ddOptStroke = guiObject:FindFirstChildWhichIsA("UIStroke")
+        if ddOptStroke then ddOptStroke:Destroy() end
+    elseif elementType == "Label" then -- Basic label styling
+        guiObject.BackgroundTransparency = 1
+        guiObject.TextColor3 = Starlight.Theme.TextSecondary
+        guiObject.TextXAlignment = Enum.TextXAlignment.Left
+        guiObject.TextYAlignment = Enum.TextYAlignment.Center
     end
-end
-
--- Creates a standard icon image label
-local function CreateIcon(iconAsset, parent, size, position, color)
-    local icon = Instance.new("ImageLabel")
-    icon.Name = "Icon"
-    icon.BackgroundTransparency = 1
-    icon.Image = iconAsset or ""
-    icon.ImageColor3 = color or Starlight.Theme.Accent
-    icon.Size = size or UDim2.new(0, 18, 0, 18)
-    icon.Position = position or UDim2.new(0, Starlight.Theme.SmallPadding.Offset, 0.5, -icon.Size.Y.Offset / 2)
-    icon.Parent = parent
-    return icon
 end
 
 --[[ Window ]]--
@@ -213,8 +243,13 @@ function Starlight:CreateWindow(config)
 
     window.MainWindow = mainFrame
 
-    -- Apply Theme Style (Corner, Stroke)
-    task.defer(ApplyThemeStyle, mainFrame, "Window") -- Defer the style application
+    -- Explicitly create the main frame's UICorner early
+    local mainCorner = Instance.new("UICorner")
+    mainCorner.Name = "UICorner" -- Explicitly name it if needed, though FindFirstChildWhichIsA is better
+    mainCorner.Parent = mainFrame
+
+    -- Apply Theme Style (Corner, Stroke) - Still deferred for other styles
+    task.defer(ApplyThemeStyle, mainFrame, "Window")
 
     -- Shadow (Optional, simple inset shadow)
     local shadow = Instance.new("Frame")
@@ -226,9 +261,9 @@ function Starlight:CreateWindow(config)
     shadow.ZIndex = mainFrame.ZIndex - 1
     shadow.Parent = mainFrame
     local shadowCorner = Instance.new("UICorner")
-    shadowCorner.CornerRadius = UDim.new(mainFrame.UICorner.CornerRadius.Scale, mainFrame.UICorner.CornerRadius.Offset + 2)
+    -- Use theme's corner radius directly + offset
+    shadowCorner.CornerRadius = UDim.new(Starlight.Theme.CornerRadius.Scale, Starlight.Theme.CornerRadius.Offset + 2) -- Line 229 area
     shadowCorner.Parent = shadow
-    task.defer(ApplyThemeStyle, shadow, "Shadow") -- Defer shadow styling
 
     -- Top Bar (Optional)
     local topBar
