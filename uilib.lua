@@ -210,7 +210,11 @@ function Starlight:CreateWindow(config)
     mainFrame.Visible = false -- Controlled by Show/Hide
     mainFrame.AnchorPoint = Vector2.new(0, 0) -- Default top-left anchor
     mainFrame.Parent = screenGui
-    ApplyThemeStyle(mainFrame, "Window")
+
+    window.MainWindow = mainFrame
+
+    -- Apply Theme Style (Corner, Stroke)
+    task.defer(ApplyThemeStyle, mainFrame, "Window") -- Defer the style application
 
     -- Shadow (Optional, simple inset shadow)
     local shadow = Instance.new("Frame")
