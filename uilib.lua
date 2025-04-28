@@ -496,7 +496,49 @@ function Cosmic:CreateWindow(config)
     }
     setmetatable(window, Cosmic)
 
-    -- Apply Initial Theme
+    -- Define UpdateElementThemes function *before* calling ModifyTheme
+    function window:UpdateElementThemes()
+        -- Update window elements
+        ApplyThemeStyle(mainFrame, "Window")
+        shadow.ImageColor3 = Cosmic.SelectedTheme.Shadow or Color3.fromRGB(0,0,0)
+        dragBarCosmetic.BackgroundColor3 = Cosmic.SelectedTheme.Accent or Color3.fromRGB(0, 220, 255)
+        if topBar then
+            ApplyThemeStyle(topBar, "TitleBar")
+            if titleIcon then titleIcon.ImageColor3 = Cosmic.SelectedTheme.TextColor end
+            if titleLabel then titleLabel.TextColor3 = Cosmic.SelectedTheme.TextColor end -- Added check for titleLabel
+            if hideButton then hideButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor end -- Added check
+            if sizeButton then sizeButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor end -- Added check
+            if searchButton then searchButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor end -- Added check
+            if settingsButton then settingsButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor end -- Added check
+        end
+        ApplyThemeStyle(searchFrame, "TextBox")
+        if searchIcon then searchIcon.ImageColor3 = Cosmic.SelectedTheme.PlaceholderColor end -- Added check
+        ApplyThemeStyle(searchInput, "TextBox")
+        ApplyThemeStyle(mobilePrompt, "Button")
+
+        -- Update tabs
+        for _, tab in ipairs(window.Tabs) do
+            if tab.IsActive then
+                ApplyThemeStyle(tab.Button, "TabButtonActive")
+                tab.Label.TextColor3 = Cosmic.SelectedTheme.SelectedTabTextColor
+                tab.Icon.ImageColor3 = Cosmic.SelectedTheme.SelectedTabTextColor
+            else
+                ApplyThemeStyle(tab.Button, "TabButton")
+                tab.Label.TextColor3 = Cosmic.SelectedTheme.TabTextColor
+                tab.Icon.ImageColor3 = Cosmic.SelectedTheme.TabTextColor
+            end
+            -- Update elements within tab
+            for _, element in ipairs(tab.Elements) do
+                if element.UpdateTheme then element:UpdateTheme() end
+            end
+        end
+         -- Update settings elements if any
+        for _, element in ipairs(window.Elements) do
+             if element.UpdateTheme then element:UpdateTheme() end
+        end
+    end
+
+    -- Apply Initial Theme (Now UpdateElementThemes is defined)
     window:ModifyTheme(config.Theme, true) -- Apply silently
 
     -- Core GUI
@@ -557,7 +599,7 @@ function Cosmic:CreateWindow(config)
     dragBarCosmetic.Parent = dragBar
 
     -- Top Bar
-    local topBar
+    local topBar, titleIcon, titleLabel, hideButton, sizeButton, searchButton, settingsButton -- Declare variables used in UpdateElementThemes
     if config.ShowTopbar then
         topBar = Instance.new("Frame")
         topBar.Name = "TitleBar"
@@ -567,7 +609,6 @@ function Cosmic:CreateWindow(config)
         topBar.Parent = mainFrame
 
         -- Icon
-        local titleIcon
         if config.Icon then
             titleIcon = CreateIcon(config.Icon, topBar,
                 UDim2.fromOffset(config.TopbarHeight * 0.6, config.TopbarHeight * 0.6),
@@ -577,8 +618,7 @@ function Cosmic:CreateWindow(config)
         end
 
         -- Title Label
-        local titleLabel = Instance.new("TextLabel")
-        titleLabel.Name = "TitleLabel"
+        titleLabel = Instance.new("TextLabel")
         local titleX = (titleIcon and titleIcon.AbsoluteSize.X + (Cosmic.SelectedTheme.Padding or 10) * 1.5) or (Cosmic.SelectedTheme.Padding or 10)
         local controlsWidth = (config.TopbarHeight * 3) + (Cosmic.SelectedTheme.Padding or 10) -- Approx width for 3 buttons
         titleLabel.Size = UDim2.new(1, -(titleX + controlsWidth), 1, 0)
@@ -597,7 +637,7 @@ function Cosmic:CreateWindow(config)
         local controlY = UDim.new(0.5, -controlButtonSize / 2)
 
         -- Hide Button (Rayfield's Minimize equivalent)
-        local hideButton = Instance.new("ImageButton")
+        hideButton = Instance.new("ImageButton")
         hideButton.Name = "HideButton"
         hideButton.Size = UDim2.fromOffset(controlButtonSize, controlButtonSize)
         hideButton.Position = UDim2.new(1, controlX, controlY.Scale, controlY.Offset)
@@ -609,7 +649,7 @@ function Cosmic:CreateWindow(config)
         controlX = controlX - (controlButtonSize + (Cosmic.SelectedTheme.SmallPadding or 5))
 
         -- Minimize/Maximize Button
-        local sizeButton = Instance.new("ImageButton")
+        sizeButton = Instance.new("ImageButton")
         sizeButton.Name = "SizeButton"
         sizeButton.Size = UDim2.fromOffset(controlButtonSize, controlButtonSize)
         sizeButton.Position = UDim2.new(1, controlX, controlY.Scale, controlY.Offset)
@@ -621,7 +661,7 @@ function Cosmic:CreateWindow(config)
         controlX = controlX - (controlButtonSize + (Cosmic.SelectedTheme.SmallPadding or 5))
 
         -- Search Button
-        local searchButton = Instance.new("ImageButton")
+        searchButton = Instance.new("ImageButton")
         searchButton.Name = "SearchButton"
         searchButton.Size = UDim2.fromOffset(controlButtonSize, controlButtonSize)
         searchButton.Position = UDim2.new(1, controlX, controlY.Scale, controlY.Offset)
@@ -633,7 +673,7 @@ function Cosmic:CreateWindow(config)
         controlX = controlX - (controlButtonSize + (Cosmic.SelectedTheme.SmallPadding or 5))
 
         -- Settings Button (Optional - Add logic to show/hide based on file system availability)
-        local settingsButton = Instance.new("ImageButton")
+        settingsButton = Instance.new("ImageButton")
         settingsButton.Name = "SettingsButton"
         settingsButton.Size = UDim2.fromOffset(controlButtonSize, controlButtonSize)
         settingsButton.Position = UDim2.new(1, controlX, controlY.Scale, controlY.Offset)
@@ -782,47 +822,8 @@ function Cosmic:CreateWindow(config)
     window.SearchInput = searchInput
     window.SizeButton = sizeButton -- Reference to minimize/maximize button
 
-    -- Add Theme Update Connection
-    function window:UpdateElementThemes()
-        -- Update window elements
-        ApplyThemeStyle(mainFrame, "Window")
-        shadow.ImageColor3 = Cosmic.SelectedTheme.Shadow or Color3.fromRGB(0,0,0)
-        dragBarCosmetic.BackgroundColor3 = Cosmic.SelectedTheme.Accent or Color3.fromRGB(0, 220, 255)
-        if topBar then
-            ApplyThemeStyle(topBar, "TitleBar")
-            if titleIcon then titleIcon.ImageColor3 = Cosmic.SelectedTheme.TextColor end
-            titleLabel.TextColor3 = Cosmic.SelectedTheme.TextColor
-            hideButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor
-            sizeButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor
-            searchButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor
-            settingsButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor
-        end
-        ApplyThemeStyle(searchFrame, "TextBox")
-        searchIcon.ImageColor3 = Cosmic.SelectedTheme.PlaceholderColor
-        ApplyThemeStyle(searchInput, "TextBox")
-        ApplyThemeStyle(mobilePrompt, "Button")
-
-        -- Update tabs
-        for _, tab in ipairs(window.Tabs) do
-            if tab.IsActive then
-                ApplyThemeStyle(tab.Button, "TabButtonActive")
-                tab.Label.TextColor3 = Cosmic.SelectedTheme.SelectedTabTextColor
-                tab.Icon.ImageColor3 = Cosmic.SelectedTheme.SelectedTabTextColor
-            else
-                ApplyThemeStyle(tab.Button, "TabButton")
-                tab.Label.TextColor3 = Cosmic.SelectedTheme.TabTextColor
-                tab.Icon.ImageColor3 = Cosmic.SelectedTheme.TabTextColor
-            end
-            -- Update elements within tab
-            for _, element in ipairs(tab.Elements) do
-                if element.UpdateTheme then element:UpdateTheme() end
-            end
-        end
-         -- Update settings elements if any
-        for _, element in ipairs(window.Elements) do
-             if element.UpdateTheme then element:UpdateTheme() end
-        end
-    end
+    -- Add Theme Update Connection (This is now handled by UpdateElementThemes)
+    -- function window:UpdateElementThemes() ... moved above ... end
 
     -- Initial Load/Setup
     Cosmic.ActiveWindows[window] = true
@@ -1083,7 +1084,7 @@ function Cosmic:ModifyTheme(themeInput, silent)
 
     Cosmic.SelectedTheme = newTheme -- Update the global selected theme for new elements
 
-    -- Update existing elements
+    -- Update existing elements (This call is now safe)
     self:UpdateElementThemes()
 
     if not silent then
@@ -2118,8 +2119,6 @@ function Cosmic:_CreateDropdown(parentTab, config)
 
     return element
 end
-
--- ...existing code...
 
 -- Keybind
 function Cosmic:_CreateKeybind(parentTab, config)
