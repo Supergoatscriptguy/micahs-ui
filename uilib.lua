@@ -1,1426 +1,2684 @@
--- Starlight UI Library - Foundation
--- Version 0.1
+-- Cosmic UI Library - v2.0 (Rayfield Feature Integration)
+-- A futuristic, animated UI library for Roblox, inspired by Rayfield features.
 
 --[[ Services ]]--
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
-local GuiService = game:GetService("GuiService") -- For inset information
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local GuiService = game:GetService("GuiService")
+
+--[[ Environment & Polyfills ]]--
+local useStudio = RunService:IsStudio()
+local writefile = writefile or function() warn("CosmicUI: writefile not available.") end
+local readfile = readfile or function() warn("CosmicUI: readfile not available."); return nil end
+local isfolder = isfolder or function() warn("CosmicUI: isfolder not available."); return false end
+local makefolder = makefolder or function() warn("CosmicUI: makefolder not available.") end
+local isfile = isfile or function() warn("CosmicUI: isfile not available."); return false end
+local request = (syn and syn.request) or (fluxus and fluxus.request) or (http and http.request) or http_request or request or function() warn("CosmicUI: request not available.") end
+local gethui = gethui or function() return CoreGui end -- Basic fallback
 
 --[[ Library Object ]]--
-local Starlight = {}
-Starlight.__index = Starlight
-Starlight.Elements = {} -- Registry for created elements if needed later
-Starlight.ActiveWindows = {} -- Track active windows
+local Cosmic = {}
+Cosmic.__index = Cosmic
+Cosmic.ActiveWindows = {}
+Cosmic.Flags = {} -- For configuration saving
+Cosmic.GlobalLoaded = false -- Track if LoadConfiguration has run
+Cosmic.BuildVersion = "Cosmic-2.0" -- Example build info
 
---[[ Default Space Theme ]]--
-Starlight.Theme = {
-    Name = "Nebula",
+--[[ Icons (Placeholder - Requires Lucide Integration like Rayfield) ]]--
+-- In a real scenario, load the Icons table like Rayfield does
+local Icons = nil -- Load the icon library here if available
+local function getIcon(name)
+    if not Icons then return { id = 0, imageRectSize = Vector2.zero, imageRectOffset = Vector2.zero } end
+    -- Add Rayfield's getIcon logic here
+    name = string.match(string.lower(name), "^%s*(.*)%s*$") :: string
+    local sizedicons = Icons['48px'] -- Assuming 48px icons
+    local r = sizedicons and sizedicons[name]
+    if not r then
+        warn(`CosmicUI Icons: Failed to find icon by the name of "{name}"`)
+        return { id = 0, imageRectSize = Vector2.zero, imageRectOffset = Vector2.zero }
+    end
+    local rirs = r[2]
+    local riro = r[3]
+    if type(r[1]) ~= "number" or type(rirs) ~= "table" or type(riro) ~= "table" then
+        warn("CosmicUI Icons: Internal error: Invalid asset entry")
+        return { id = 0, imageRectSize = Vector2.zero, imageRectOffset = Vector2.zero }
+    end
+    local irs = Vector2.new(rirs[1], rirs[2])
+    local iro = Vector2.new(riro[1], riro[2])
+    return { id = r[1], imageRectSize = irs, imageRectOffset = iro }
+end
+local function getAssetUri(idOrName)
+    if type(idOrName) == "number" then
+        return "rbxassetid://" .. idOrName
+    elseif type(idOrName) == "string" and Icons then
+        local asset = getIcon(idOrName)
+        return "rbxassetid://" .. asset.id
+    elseif type(idOrName) == "string" and not Icons then
+        warn("CosmicUI: Cannot use icon names as icon library is not loaded.")
+        return "rbxassetid://0"
+    else
+        return "rbxassetid://0" -- Default/Error
+    end
+end
 
-    -- Colors (Deep space blues, purples, neon accents)
-    Background = Color3.fromRGB(15, 15, 30),       -- Very dark blue/purple
-    Primary = Color3.fromRGB(120, 100, 220),     -- Vibrant purple for interaction
-    Secondary = Color3.fromRGB(30, 30, 55),       -- Darker element background
-    Accent = Color3.fromRGB(0, 200, 255),       -- Bright cyan/blue accent
-    Accent2 = Color3.fromRGB(200, 0, 255),      -- Bright magenta accent (optional)
-    Text = Color3.fromRGB(220, 220, 255),       -- Off-white / very light lavender
-    TextSecondary = Color3.fromRGB(160, 160, 190), -- Dimmer text for descriptions
-    TextDisabled = Color3.fromRGB(100, 100, 120),
-    Hover = Color3.fromRGB(45, 45, 75),         -- Hover background
-    Click = Color3.fromRGB(60, 60, 95),         -- Click feedback background
-    Stroke = Color3.fromRGB(60, 60, 90),         -- Subtle border/stroke
-    StrokeHighlight = Color3.fromRGB(0, 200, 255), -- Accent stroke on hover/focus
-    Error = Color3.fromRGB(255, 80, 80),
-    Warning = Color3.fromRGB(255, 180, 80),
-    Success = Color3.fromRGB(80, 255, 120),
 
-    -- Fonts (Consider futuristic/clean fonts)
-    Font = Enum.Font.SourceSans,
-    FontBold = Enum.Font.SourceSansBold,
-    FontTitle = Enum.Font.SourceSansSemibold, -- Or a distinct title font
-
-    -- Sizes & Padding
-    TextSize = 14,
-    TextSizeSmall = 12,
-    TextSizeTitle = 18,
-    Padding = UDim.new(0, 8),
-    SmallPadding = UDim.new(0, 4),
-    ElementHeight = 36,
-    TitleBarHeight = 32,
-
-    -- Rounding
-    CornerRadius = UDim.new(0, 6),
-    SmallCornerRadius = UDim.new(0, 3),
-
-    -- Icons (Placeholders - Use Asset IDs)
-    Icons = {
-        DefaultTab = "rbxassetid://6031069821", -- Example: Gear icon
-        Close = "rbxassetid://5108077919", -- Example: Close X
-        Minimize = "rbxassetid://5108077471", -- Example: Minimize line
-        Maximize = "rbxassetid://5108077600", -- Example: Maximize square
-        Settings = "rbxassetid://6031069821", -- Example: Gear
-        Search = "rbxassetid://6031069821", -- Example: Magnifying glass
-        DropdownArrow = "rbxassetid://6031069821", -- Example: Chevron down
-        ToggleOn = "rbxassetid://6031069821", -- Example: Checkmark
-        ToggleOff = "rbxassetid://6031069821", -- Example: Empty circle
-        Info = "rbxassetid://6031069821",
-        Warning = "rbxassetid://6031069821",
-        Error = "rbxassetid://6031069821",
+--[[ Cosmic Themes (Ported & Adapted from Rayfield + Original Cosmic) ]]--
+Cosmic.Themes = {
+    ["Cosmic Dark"] = { -- Original Cosmic Theme
+        Name = "Cosmic Dark",
+        TextColor = Color3.fromRGB(230, 230, 255),
+        TextSecondary = Color3.fromRGB(150, 150, 180),
+        TextDisabled = Color3.fromRGB(80, 80, 100),
+        Background = Color3.fromRGB(10, 5, 25),
+        Topbar = Color3.fromRGB(15, 10, 35), -- Slightly lighter topbar
+        Shadow = Color3.fromRGB(5, 0, 15), -- Darker shadow
+        NotificationBackground = Color3.fromRGB(20, 15, 40),
+        TabBackground = Color3.fromRGB(20, 15, 40),
+        TabStroke = Color3.fromRGB(40, 30, 70),
+        TabBackgroundSelected = Color3.fromRGB(100, 80, 255), -- Primary color
+        TabTextColor = Color3.fromRGB(150, 150, 180),
+        SelectedTabTextColor = Color3.fromRGB(255, 255, 255), -- Bright white
+        ElementBackground = Color3.fromRGB(20, 15, 40),
+        ElementBackgroundHover = Color3.fromRGB(35, 30, 60),
+        SecondaryElementBackground = Color3.fromRGB(15, 10, 35), -- e.g., Labels
+        ElementStroke = Color3.fromRGB(40, 30, 70),
+        SecondaryElementStroke = Color3.fromRGB(30, 20, 50),
+        SliderBackground = Color3.fromRGB(30, 25, 55), -- Dimmer track
+        SliderProgress = Color3.fromRGB(100, 80, 255), -- Primary
+        SliderStroke = Color3.fromRGB(0, 220, 255), -- Accent
+        ToggleBackground = Color3.fromRGB(30, 25, 55),
+        ToggleEnabled = Color3.fromRGB(0, 220, 255), -- Accent
+        ToggleDisabled = Color3.fromRGB(80, 80, 100),
+        ToggleEnabledStroke = Color3.fromRGB(100, 240, 255), -- Brighter Accent
+        ToggleDisabledStroke = Color3.fromRGB(100, 100, 120),
+        ToggleEnabledOuterStroke = Color3.fromRGB(0, 180, 220), -- Slightly darker Accent
+        ToggleDisabledOuterStroke = Color3.fromRGB(50, 40, 80),
+        DropdownSelected = Color3.fromRGB(35, 30, 60), -- Hover color
+        DropdownUnselected = Color3.fromRGB(20, 15, 40), -- Element Background
+        InputBackground = Color3.fromRGB(15, 10, 35), -- Darker Input
+        InputStroke = Color3.fromRGB(0, 220, 255), -- Accent Stroke
+        PlaceholderColor = Color3.fromRGB(80, 80, 100),
+        GlowColor = Color3.fromRGB(0, 220, 255),
+        Accent = Color3.fromRGB(0, 220, 255),
+        Primary = Color3.fromRGB(100, 80, 255),
+        Error = Color3.fromRGB(255, 60, 100),
+        Font = Enum.Font.TitilliumWeb,
+        FontBold = Enum.Font.TitilliumWeb,
+        FontTitle = Enum.Font.TitilliumWeb,
+        TextSize = 15,
+        TextSizeSmall = 13,
+        TextSizeTitle = 18,
+        Padding = 10,
+        SmallPadding = 5,
+        ElementHeight = 38,
+        TitleBarHeight = 35,
+        ScrollBarThickness = 5,
+        CornerRadius = UDim.new(0, 4),
+        SmallCornerRadius = UDim.new(0, 2),
+        AnimationSpeed = 0.2,
+        EasingStyle = Enum.EasingStyle.Quad,
+        EasingDirection = Enum.EasingDirection.Out,
+        Icons = { -- Default Icons (Placeholders)
+            DefaultTab = "rbxassetid://6031069821",
+            Close = "rbxassetid://5108077919",
+            Minimize = "rbxassetid://5108077471", -- Placeholder for Hide
+            Maximize = "rbxassetid://11036884234", -- Placeholder for Maximize
+            Restore = "rbxassetid://10137941941", -- Placeholder for Restore
+            Search = "rbxassetid://6031069821", -- Placeholder
+            Settings = "rbxassetid://6031069821", -- Placeholder
+            DropdownArrow = "rbxassetid://6031069821",
+            Keybind = "rbxassetid://6031069821",
+            NotificationDefault = "rbxassetid://4370033185",
+        }
     },
-
-    -- Animations
-    AnimationSpeed = 0.25, -- Base speed for tweens
-    EasingStyle = Enum.EasingStyle.Quart, -- Smooth easing
-    EasingDirection = Enum.EasingDirection.Out,
+    -- Add other Rayfield themes here, adapting colors slightly if needed for the Cosmic style
+    ["Default"] = RayfieldLibrary.Theme.Default, -- Assuming RayfieldLibrary is accessible or copy themes
+    ["Ocean"] = RayfieldLibrary.Theme.Ocean,
+    ["AmberGlow"] = RayfieldLibrary.Theme.AmberGlow,
+    ["Light"] = RayfieldLibrary.Theme.Light,
+    ["Amethyst"] = RayfieldLibrary.Theme.Amethyst,
+    ["Green"] = RayfieldLibrary.Theme.Green,
+    ["Bloom"] = RayfieldLibrary.Theme.Bloom,
+    ["DarkBlue"] = RayfieldLibrary.Theme.DarkBlue,
+    ["Serenity"] = RayfieldLibrary.Theme.Serenity,
+    -- Add more themes...
 }
+Cosmic.SelectedTheme = Cosmic.Themes["Cosmic Dark"] -- Default theme
 
---[[ Internal Helper Functions ]]--
-
--- Creates a standard tween info object
-local function CreateTweenInfo(speedOverride)
+--[[ Utility Functions ]]--
+local function CreateTweenInfo(speedOverride, styleOverride, directionOverride)
     return TweenInfo.new(
-        speedOverride or Starlight.Theme.AnimationSpeed,
-        Starlight.Theme.EasingStyle,
-        Starlight.Theme.EasingDirection
+        speedOverride or Cosmic.SelectedTheme.AnimationSpeed or 0.2,
+        styleOverride or Cosmic.SelectedTheme.EasingStyle or Enum.EasingStyle.Quad,
+        directionOverride or Cosmic.SelectedTheme.EasingDirection or Enum.EasingDirection.Out
     )
 end
 
--- Creates and plays a tween
-local function PlayTween(object, propertyTable, speedOverride)
-    local tweenInfo = CreateTweenInfo(speedOverride)
+local function PlayTween(object, propertyTable, speedOverride, styleOverride, directionOverride)
+    local tweenInfo = CreateTweenInfo(speedOverride, styleOverride, directionOverride)
     local tween = TweenService:Create(object, tweenInfo, propertyTable)
     tween:Play()
     return tween
 end
 
--- Applies basic theme properties (can be expanded)
+local function ApplyGlow(guiObject, color, transparency, thickness)
+    -- Simplified glow using UIStroke for broader compatibility
+    local glow = guiObject:FindFirstChild("GlowStroke") or Instance.new("UIStroke")
+    glow.Name = "GlowStroke"
+    glow.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    glow.Color = color or Cosmic.SelectedTheme.GlowColor or Cosmic.SelectedTheme.Accent
+    glow.Transparency = transparency or 0.7
+    glow.Thickness = thickness or 1.5
+    glow.LineJoinMode = Enum.LineJoinMode.Round
+    glow.Enabled = true
+    glow.Parent = guiObject
+    return glow
+end
+
 local function ApplyThemeStyle(guiObject, elementType)
-    -- Find or create UICorner
-    local corner = guiObject:FindFirstChildWhichIsA("UICorner")
-    if not corner and elementType ~= "Window" and elementType ~= "TitleBar" then -- Avoid double-creating for window/title if created explicitly
-        corner = Instance.new("UICorner")
-        corner.Parent = guiObject
-    end
-    -- Apply corner radius if corner exists
-    if corner then
-        corner.CornerRadius = Starlight.Theme.CornerRadius -- Default radius
-    end
+    local theme = Cosmic.SelectedTheme
 
-    -- Find or create UIStroke
-    local stroke = guiObject:FindFirstChildWhichIsA("UIStroke")
-    if not stroke and elementType ~= "Window" and elementType ~= "TitleBar" and elementType ~= "TabButton" then -- Avoid double strokes
-        stroke = Instance.new("UIStroke")
-        stroke.Parent = guiObject
-    end
-    -- Apply stroke style if stroke exists
-    if stroke then
-        stroke.Color = Starlight.Theme.Stroke
-        stroke.Thickness = 1
-        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    end
-
-    -- Apply text styles
-    if guiObject:IsA("TextLabel") or guiObject:IsA("TextButton") or guiObject:IsA("TextBox") then
-        guiObject.Font = Starlight.Theme.Font
-        guiObject.TextColor3 = Starlight.Theme.Text
-        guiObject.TextSize = Starlight.Theme.TextSize
-        guiObject.TextWrapped = true -- Default to wrapped
-        guiObject.TextXAlignment = Enum.TextXAlignment.Left
-        guiObject.TextYAlignment = Enum.TextYAlignment.Center
-    end
-
-    -- Specific element type styling
-    if elementType == "Window" then
-        guiObject.BackgroundColor3 = Starlight.Theme.Background
+    -- Basic Defaults
+    if guiObject:IsA("GuiObject") then
+        guiObject.BackgroundColor3 = theme.ElementBackground or Color3.fromRGB(35, 35, 35)
         guiObject.BorderSizePixel = 0
-        -- Ensure window corner radius is set (corner should exist now)
-        local windowCorner = guiObject:FindFirstChildWhichIsA("UICorner")
-        if windowCorner then
-             windowCorner.CornerRadius = Starlight.Theme.CornerRadius -- Ensure main window radius
+        if guiObject:IsA("Frame") or guiObject:IsA("ScrollingFrame") or guiObject:IsA("TextBox") or guiObject:IsA("TextButton") then
+             guiObject.BackgroundTransparency = 0
+        else
+             guiObject.BackgroundTransparency = 1 -- Default others to transparent
         end
-    elseif elementType == "TitleBar" then
-        guiObject.BackgroundColor3 = Starlight.Theme.Secondary -- Slightly different title bar
-        guiObject.BorderSizePixel = 0
-        -- Title bar doesn't usually need its own corner if window has one and ClipsDescendants=true
-        local titleCorner = guiObject:FindFirstChildWhichIsA("UICorner")
-        if titleCorner then titleCorner:Destroy() end -- Remove if exists
-        local titleStroke = guiObject:FindFirstChildWhichIsA("UIStroke")
-        if titleStroke then titleStroke:Destroy() end -- Remove if exists
-    elseif elementType == "Button" then
-        guiObject.BackgroundColor3 = Starlight.Theme.Primary
-        guiObject.TextColor3 = Starlight.Theme.Text -- Ensure text is readable on primary
-        -- Ensure buttons don't get a stroke from the universal logic
-        local btnStroke = guiObject:FindFirstChildWhichIsA("UIStroke")
-        if btnStroke then btnStroke:Destroy() end
-        -- Ensure button corner uses main radius
-        local btnCorner = guiObject:FindFirstChildWhichIsA("UICorner")
-        if btnCorner then btnCorner.CornerRadius = Starlight.Theme.CornerRadius end
-
-    elseif elementType == "TabButton" then
-         guiObject.BackgroundColor3 = Starlight.Theme.Secondary
-         guiObject.BorderSizePixel = 0
-         -- Ensure tab button corner uses small radius
-         local tabCorner = guiObject:FindFirstChildWhichIsA("UICorner")
-         if tabCorner then tabCorner.CornerRadius = Starlight.Theme.SmallCornerRadius end
-         -- Hide stroke by default
-         local tabStroke = guiObject:FindFirstChildWhichIsA("UIStroke")
-         if tabStroke then tabStroke.Transparency = 1 end
-    elseif elementType == "TabContent" then
-         guiObject.BackgroundColor3 = Starlight.Theme.Background -- Match window background
-         guiObject.BorderSizePixel = 0
-         -- Content frame shouldn't need corner/stroke usually
-         local contentCorner = guiObject:FindFirstChildWhichIsA("UICorner")
-         if contentCorner then contentCorner:Destroy() end
-         local contentStroke = guiObject:FindFirstChildWhichIsA("UIStroke")
-         if contentStroke then contentStroke:Destroy() end
-    elseif elementType == "ListFrame" then -- Style for dropdown list
-        guiObject.BackgroundColor3 = Starlight.Theme.Secondary
-        local listCorner = guiObject:FindFirstChildWhichIsA("UICorner") or Instance.new("UICorner")
-        listCorner.CornerRadius = Starlight.Theme.SmallCornerRadius
-        listCorner.Parent = guiObject
-        local listStroke = guiObject:FindFirstChildWhichIsA("UIStroke") or Instance.new("UIStroke")
-        listStroke.Color = Starlight.Theme.Stroke
-        listStroke.Thickness = 1
-        listStroke.Parent = guiObject
-    elseif elementType == "DropdownOption" then -- Style for dropdown options
-        guiObject.Font = Starlight.Theme.Font
-        guiObject.TextSize = Starlight.Theme.TextSizeSmall
-        guiObject.TextColor3 = Starlight.Theme.Text
-        -- No corner or stroke needed usually
-        local ddOptCorner = guiObject:FindFirstChildWhichIsA("UICorner")
-        if ddOptCorner then ddOptCorner:Destroy() end
-        local ddOptStroke = guiObject:FindFirstChildWhichIsA("UIStroke")
-        if ddOptStroke then ddOptStroke:Destroy() end
-    elseif elementType == "Label" then -- Basic label styling
-        guiObject.BackgroundTransparency = 1
-        guiObject.TextColor3 = Starlight.Theme.TextSecondary
+    end
+    if guiObject:IsA("TextLabel") or guiObject:IsA("TextButton") or guiObject:IsA("TextBox") then
+        guiObject.Font = theme.Font or Enum.Font.SourceSans
+        guiObject.TextColor3 = theme.TextColor or Color3.fromRGB(240, 240, 240)
+        guiObject.TextSize = theme.TextSize or 14
+        guiObject.TextWrapped = true
         guiObject.TextXAlignment = Enum.TextXAlignment.Left
         guiObject.TextYAlignment = Enum.TextYAlignment.Center
+    end
+    if guiObject:IsA("ImageLabel") or guiObject:IsA("ImageButton") then
+        guiObject.ImageColor3 = theme.TextColor or Color3.fromRGB(240, 240, 240)
+        guiObject.BackgroundTransparency = 1
+    end
+
+    -- Corner Radius
+    local corner = guiObject:FindFirstChildWhichIsA("UICorner") or Instance.new("UICorner")
+    corner.CornerRadius = theme.CornerRadius or UDim.new(0, 4)
+    corner.Parent = guiObject
+
+    -- Stroke
+    local stroke = guiObject:FindFirstChild("BaseStroke") or Instance.new("UIStroke")
+    stroke.Name = "BaseStroke"
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Color = theme.ElementStroke or Color3.fromRGB(50, 50, 50)
+    stroke.Thickness = 1
+    stroke.Transparency = 0
+    stroke.Enabled = true
+    stroke.Parent = guiObject
+
+    -- Element Specific Overrides (Simplified - expand as needed based on Rayfield themes)
+    if elementType == "Window" then
+        guiObject.BackgroundColor3 = theme.Background
+        if stroke then stroke.Color = theme.Shadow or theme.Background; stroke.Thickness = 2; end -- Use shadow as border
+    elseif elementType == "TitleBar" then
+        guiObject.BackgroundColor3 = theme.Topbar
+        if corner then corner.Parent = nil; corner:Destroy() end
+        if stroke then stroke.Enabled = false end
+    elseif elementType == "Button" then
+        guiObject.BackgroundColor3 = theme.Primary or theme.ElementBackground
+        guiObject.TextColor3 = theme.SelectedTabTextColor or theme.TextColor
+        corner.CornerRadius = theme.SmallCornerRadius or UDim.new(0, 2)
+        if stroke then stroke.Enabled = false end
+    elseif elementType == "TabButton" then
+        guiObject.BackgroundColor3 = theme.TabBackground
+        guiObject.TextColor3 = theme.TabTextColor
+        corner.CornerRadius = theme.SmallCornerRadius or UDim.new(0, 2)
+        stroke.Color = theme.TabStroke
+        stroke.Transparency = 0.5
+    elseif elementType == "TabButtonActive" then
+        guiObject.BackgroundColor3 = theme.TabBackgroundSelected
+        guiObject.TextColor3 = theme.SelectedTabTextColor
+        corner.CornerRadius = theme.SmallCornerRadius or UDim.new(0, 2)
+        if stroke then stroke.Transparency = 1 end -- Hide stroke when active
+    elseif elementType == "TabContent" then
+        guiObject.BackgroundColor3 = theme.Background
+        if corner then corner.Parent = nil; corner:Destroy() end
+        if stroke then stroke.Enabled = false end
+    elseif elementType == "ScrollingFrame" then
+        guiObject.BackgroundColor3 = Color3.clear(1)
+        guiObject.BorderSizePixel = 0
+        guiObject.ScrollBarThickness = theme.ScrollBarThickness or 6
+        guiObject.ScrollBarImageColor3 = theme.Accent or theme.SliderProgress
+        if corner then corner.Parent = nil; corner:Destroy() end
+        if stroke then stroke.Enabled = false end
+    elseif elementType == "TextBox" then
+        guiObject.BackgroundColor3 = theme.InputBackground
+        guiObject.TextColor3 = theme.TextColor
+        guiObject.PlaceholderColor3 = theme.PlaceholderColor or theme.TextDisabled
+        corner.CornerRadius = theme.SmallCornerRadius or UDim.new(0, 2)
+        stroke.Color = theme.InputStroke
+        stroke.Enabled = true
+    elseif elementType == "Label" then
+        guiObject.BackgroundColor3 = theme.SecondaryElementBackground or theme.ElementBackground
+        guiObject.TextColor3 = theme.TextColor
+        stroke.Color = theme.SecondaryElementStroke or theme.ElementStroke
+    elseif elementType == "DropdownList" then -- The dropdown frame itself when open
+        guiObject.BackgroundColor3 = theme.Background -- Match window bg
+        stroke.Color = theme.ElementStroke
+        stroke.Thickness = 1.5
+    elseif elementType == "DropdownOption" then
+        guiObject.BackgroundColor3 = theme.DropdownUnselected
+        guiObject.TextColor3 = theme.TextColor
+        corner.CornerRadius = theme.SmallCornerRadius or UDim.new(0, 2)
+        stroke.Color = theme.ElementStroke
+        stroke.Transparency = 0.5
+    elseif elementType == "DropdownOptionSelected" then
+        guiObject.BackgroundColor3 = theme.DropdownSelected
+        guiObject.TextColor3 = theme.SelectedTabTextColor or theme.TextColor -- Use brighter text
+        corner.CornerRadius = theme.SmallCornerRadius or UDim.new(0, 2)
+        stroke.Color = theme.ElementStroke
+        stroke.Transparency = 0
+    elseif elementType == "SliderTrack" then
+        guiObject.BackgroundColor3 = theme.SliderBackground
+        corner.CornerRadius = UDim.new(1, 0) -- Pill shape
+        stroke.Color = theme.SliderStroke
+        stroke.Transparency = 0.4
+    elseif elementType == "SliderFill" then
+        guiObject.BackgroundColor3 = theme.SliderProgress
+        corner.CornerRadius = UDim.new(1, 0)
+        stroke.Color = theme.SliderStroke
+        stroke.Transparency = 0.3
+    elseif elementType == "ToggleFrame" then
+        guiObject.BackgroundColor3 = theme.ToggleBackground
+        corner.CornerRadius = UDim.new(1, 0) -- Pill shape
+        stroke.Color = theme.ToggleDisabledOuterStroke -- Start with disabled outer stroke
+        stroke.Enabled = true
+    elseif elementType == "ToggleIndicator" then
+        guiObject.BackgroundColor3 = theme.ToggleDisabled -- Start disabled
+        corner.CornerRadius = UDim.new(0.5, 0) -- Circle
+        stroke.Color = theme.ToggleDisabledStroke -- Start disabled inner stroke
+        stroke.Enabled = true
+    elseif elementType == "ColorPickerDisplay" then
+        corner.CornerRadius = theme.SmallCornerRadius or UDim.new(0, 2)
+        stroke.Color = theme.ElementStroke
+        stroke.Enabled = true
+    -- Add more specific styles based on Rayfield's themes
     end
 end
 
+-- Helper to create an icon using ImageLabel or TextLabel (if using icon fonts)
+local function CreateIcon(assetIdOrName, parent, size, position, color)
+    local icon = Instance.new("ImageLabel")
+    icon.Name = "Icon"
+    icon.BackgroundTransparency = 1
+    icon.Size = size or UDim2.new(0, 18, 0, 18)
+    icon.Position = position or UDim2.fromScale(0, 0.5)
+    icon.AnchorPoint = Vector2.new(0, 0.5)
+    icon.ImageColor3 = color or Cosmic.SelectedTheme.TextColor
+    icon.ScaleType = Enum.ScaleType.Fit
+
+    if type(assetIdOrName) == "number" then
+        icon.Image = "rbxassetid://" .. assetIdOrName
+    elseif type(assetIdOrName) == "string" and Icons then
+        local asset = getIcon(assetIdOrName)
+        icon.Image = "rbxassetid://" .. asset.id
+        icon.ImageRectOffset = asset.imageRectOffset
+        icon.ImageRectSize = asset.imageRectSize
+    else
+        icon.Image = "rbxassetid://0" -- Default/Error
+    end
+
+    icon.Parent = parent
+    return icon
+end
+
+-- Draggable Functionality (Adapted from Rayfield)
+local function makeDraggable(object, dragObject, enableTaptic, tapticBar, tapticOffset)
+    local dragging = false
+    local relative = nil
+    local screenGui = object:FindFirstAncestorWhichIsA("ScreenGui")
+    local offset = (screenGui and screenGui.IgnoreGuiInset) and GuiService:GetGuiInset() or Vector2.zero
+
+    local tapticBarCosmetic = tapticBar and tapticBar:FindFirstChild("Drag")
+
+    local function updateTapticBar(state)
+        if not tapticBar or not tapticBarCosmetic or not enableTaptic then return end
+        if state == "dragging" then
+            PlayTween(tapticBarCosmetic, {Size = UDim2.new(0, 110, 0, 4), BackgroundTransparency = 0}, 0.35, Enum.EasingStyle.Back)
+        elseif state == "hover" then
+            PlayTween(tapticBarCosmetic, {BackgroundTransparency = 0.5, Size = UDim2.new(0, 120, 0, 4)}, 0.25, Enum.EasingStyle.Back)
+        else -- normal / leave
+            PlayTween(tapticBarCosmetic, {BackgroundTransparency = 0.7, Size = UDim2.new(0, 100, 0, 4)}, 0.25, Enum.EasingStyle.Back)
+        end
+    end
+
+    local connections = {}
+
+    if enableTaptic and tapticBar then
+        table.insert(connections, tapticBar.MouseEnter:Connect(function() if not dragging then updateTapticBar("hover") end end))
+        table.insert(connections, tapticBar.MouseLeave:Connect(function() if not dragging then updateTapticBar("normal") end end))
+    end
+
+    table.insert(connections, dragObject.InputBegan:Connect(function(input, processed)
+        if processed then return end
+        local inputType = input.UserInputType
+        if inputType == Enum.UserInputType.MouseButton1 or inputType == Enum.UserInputType.Touch then
+            dragging = true
+            relative = object.AbsolutePosition + object.AbsoluteSize * object.AnchorPoint - UserInputService:GetMouseLocation()
+            updateTapticBar("dragging")
+            input:GetPropertyChangedSignal("UserInputState"):Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    -- Check if mouse is still over the taptic bar on release
+                    local mousePos = UserInputService:GetMouseLocation()
+                    local barPos = tapticBar.AbsolutePosition
+                    local barSize = tapticBar.AbsoluteSize
+                    if enableTaptic and mousePos.X >= barPos.X and mousePos.X <= barPos.X + barSize.X and mousePos.Y >= barPos.Y and mousePos.Y <= barPos.Y + barSize.Y then
+                        updateTapticBar("hover")
+                    else
+                        updateTapticBar("normal")
+                    end
+                end
+            end)
+        end
+    end))
+
+    table.insert(connections, RunService.RenderStepped:Connect(function()
+        if dragging then
+            local position = UserInputService:GetMouseLocation() + relative + offset
+            -- Basic screen clamping
+            local viewportSize = workspace.CurrentCamera.ViewportSize
+            local guiInset = GuiService:GetGuiInset()
+            local absSize = object.AbsoluteSize
+            local anchor = object.AnchorPoint
+            local minX = absSize.X * anchor.X
+            local maxX = viewportSize.X - absSize.X * (1 - anchor.X)
+            local minY = guiInset.Y + absSize.Y * anchor.Y
+            local maxY = viewportSize.Y - absSize.Y * (1 - anchor.Y)
+
+            position = Vector2.new(math.clamp(position.X, minX, maxX), math.clamp(position.Y, minY, maxY))
+
+            local targetPos = UDim2.fromOffset(position.X, position.Y)
+
+            if enableTaptic and tapticOffset then
+                PlayTween(object, {Position = targetPos}, 0.1, Enum.EasingStyle.Exponential) -- Faster tween for main window
+                if tapticBar then
+                    local tapticYOffset = tapticOffset[1] -- Use index 1 for offset
+                    PlayTween(tapticBar, {Position = UDim2.fromOffset(position.X, position.Y + tapticYOffset)}, 0.05, Enum.EasingStyle.Exponential)
+                end
+            else
+                object.Position = targetPos
+                if tapticBar and tapticOffset then
+                    local tapticYOffset = tapticOffset[1]
+                    tapticBar.Position = UDim2.fromOffset(position.X, position.Y + tapticYOffset)
+                end
+            end
+        end
+    end))
+
+    -- Return connections table for cleanup
+    return connections
+end
+
+-- Configuration Saving Utilities (Adapted from Rayfield)
+local function PackColor(color)
+    return {R = math.floor(color.R * 255 + 0.5), G = math.floor(color.G * 255 + 0.5), B = math.floor(color.B * 255 + 0.5)}
+end
+local function UnpackColor(colorTable)
+    return Color3.fromRGB(colorTable.R or 0, colorTable.G or 0, colorTable.B or 0)
+end
+
 --[[ Window ]]--
-function Starlight:CreateWindow(config)
-    -- config = { Title = "Starlight UI", Size = UDim2.new(0, 550, 0, 400), Position = nil, Draggable = true, StartVisible = true, ShowTopbar = true, TopbarHeight = 32, MinSize = UDim2.new(0, 300, 0, 200) }
-
-    local window = {}
-    setmetatable(window, Starlight) -- Inherit library methods
-
-    -- Configuration Defaults
-    config.Title = config.Title or "Starlight UI"
+function Cosmic:CreateWindow(config)
+    config = config or {}
+    config.Name = config.Name or "Cosmic UI"
+    config.Title = config.Title or config.Name -- Use Name if Title missing
     config.Size = config.Size or UDim2.new(0, 550, 0, 400)
-    config.Draggable = config.Draggable ~= false -- Default true
-    config.StartVisible = config.StartVisible ~= false -- Default true
-    config.ShowTopbar = config.ShowTopbar ~= false -- Default true
-    config.TopbarHeight = config.TopbarHeight or Starlight.Theme.TitleBarHeight
-    config.MinSize = config.MinSize or UDim2.new(0, 300, 0, 200)
+    config.Position = config.Position -- Default to centered in Show() if nil
+    config.Draggable = config.Draggable ~= false
+    config.StartVisible = config.StartVisible ~= false
+    config.ShowTopbar = config.ShowTopbar ~= false
+    config.Icon = config.Icon -- Asset ID or Lucide Name
+    config.Theme = config.Theme or "Cosmic Dark" -- Theme name or table
+    config.TopbarHeight = config.TopbarHeight or (Cosmic.Themes[config.Theme] or Cosmic.SelectedTheme).TitleBarHeight or 35
 
-    -- State Variables
-    window.Visible = false -- Will be set by Show/Hide
-    window.IsDragging = false
-    window.DragStart = nil
-    window.StartPos = nil
-    window.Tabs = {}
-    window.ActiveTab = nil
-    window.Elements = {} -- Elements specific to this window instance
+    -- Rayfield specific configs
+    config.ConfigurationSaving = config.ConfigurationSaving or { Enabled = false }
+    config.ConfigurationSaving.FolderName = config.ConfigurationSaving.FolderName or "CosmicUI_Configs"
+    config.ConfigurationSaving.FileName = config.ConfigurationSaving.FileName or tostring(game.PlaceId or "default")
+    config.Discord = config.Discord or { Enabled = false }
+    config.KeySystem = config.KeySystem or false
+    config.KeySettings = config.KeySettings or {}
+    config.DisableRayfieldPrompts = config.DisableRayfieldPrompts -- Keep name for compatibility
 
-    -- Create Core GUI Objects
+    local window = {
+        Visible = false,
+        IsDragging = false,
+        DragStart = nil,
+        StartPos = nil,
+        Tabs = {},
+        ActiveTab = nil,
+        Elements = {}, -- For elements not in tabs (like settings)
+        Config = config,
+        Connections = {},
+        IsMinimized = false,
+        OriginalSize = config.Size,
+        OriginalPosition = nil, -- Store position before minimize/hide
+        ThemeConnections = {}, -- Connections to update theme
+        SearchOpen = false,
+        CFileName = config.ConfigurationSaving.FileName,
+        CFolderName = config.ConfigurationSaving.FolderName,
+        CEnabled = config.ConfigurationSaving.Enabled,
+    }
+    setmetatable(window, Cosmic)
+
+    -- Apply Initial Theme
+    window:ModifyTheme(config.Theme, true) -- Apply silently
+
+    -- Core GUI
     local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = config.Title:gsub("%s+", "") .. "UI" -- Remove spaces for name
+    screenGui.Name = config.Name:gsub("[^%w]+", "") .. "UI"
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     screenGui.ResetOnSpawn = false
-    screenGui.DisplayOrder = 1000 -- High display order
+    screenGui.DisplayOrder = 10000
+    screenGui.Enabled = false
+    screenGui.IgnoreGuiInset = true -- Match Rayfield behavior
+    screenGui.Parent = gethui() -- Use gethui or fallback
+
+    -- Shadow (like Rayfield)
+    local shadow = Instance.new("ImageLabel")
+    shadow.Name = "Shadow"
+    shadow.BackgroundTransparency = 1
+    shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+    shadow.Position = UDim2.fromScale(0.5, 0.5)
+    shadow.Size = UDim2.new(1, 20, 1, 20) -- Slightly larger for shadow effect
+    shadow.Image = "rbxassetid://10137941941" -- 9-slice shadow image (replace if needed)
+    shadow.ScaleType = Enum.ScaleType.Slice
+    shadow.SliceCenter = Rect.new(10, 10, 118, 118) -- Adjust slice center for shadow image
+    shadow.ImageColor3 = Cosmic.SelectedTheme.Shadow or Color3.fromRGB(0,0,0)
+    shadow.ImageTransparency = 0.6
+    shadow.ZIndex = 0
+    shadow.Parent = screenGui -- Parent to ScreenGui, behind MainFrame
 
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainWindow"
     mainFrame.Size = config.Size
-    mainFrame.Position = config.Position or UDim2.new(0.5, -config.Size.X.Offset / 2, 0.5, -config.Size.Y.Offset / 2)
     mainFrame.ClipsDescendants = true
-    mainFrame.Visible = false -- Controlled by Show/Hide
-    mainFrame.AnchorPoint = Vector2.new(0, 0) -- Default top-left anchor
+    mainFrame.Visible = false
+    mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+    mainFrame.ZIndex = 1
+    ApplyThemeStyle(mainFrame, "Window")
     mainFrame.Parent = screenGui
 
-    window.MainWindow = mainFrame
+    -- Taptic Drag Bar (Visual only)
+    local dragBar = Instance.new("Frame")
+    dragBar.Name = "DragBar"
+    dragBar.Size = UDim2.new(0, 100, 0, 4)
+    dragBar.AnchorPoint = Vector2.new(0.5, 0)
+    -- Position set dynamically by makeDraggable
+    dragBar.BackgroundTransparency = 1 -- Fully transparent container
+    dragBar.ZIndex = 2
+    dragBar.Parent = screenGui
 
-    -- Explicitly create the main frame's UICorner early
-    local mainCorner = Instance.new("UICorner")
-    mainCorner.Name = "UICorner" -- Explicitly name it if needed, though FindFirstChildWhichIsA is better
-    mainCorner.Parent = mainFrame
+    local dragBarCosmetic = Instance.new("Frame")
+    dragBarCosmetic.Name = "Drag"
+    dragBarCosmetic.Size = UDim2.fromScale(1, 1)
+    dragBarCosmetic.AnchorPoint = Vector2.new(0.5, 0.5)
+    dragBarCosmetic.Position = UDim2.fromScale(0.5, 0.5)
+    dragBarCosmetic.BackgroundColor3 = Cosmic.SelectedTheme.Accent or Color3.fromRGB(0, 220, 255)
+    dragBarCosmetic.BackgroundTransparency = 0.7
+    local dragCorner = Instance.new("UICorner")
+    dragCorner.CornerRadius = UDim.new(1, 0)
+    dragCorner.Parent = dragBarCosmetic
+    dragBarCosmetic.Parent = dragBar
 
-    -- Apply Theme Style (Corner, Stroke) - Still deferred for other styles
-    task.defer(ApplyThemeStyle, mainFrame, "Window")
-
-    -- Shadow (Optional, simple inset shadow)
-    local shadow = Instance.new("Frame")
-    shadow.Name = "Shadow"
-    shadow.Size = UDim2.new(1, 4, 1, 4) -- Slightly larger
-    shadow.Position = UDim2.new(0, -2, 0, -2) -- Offset slightly
-    shadow.BackgroundColor3 = Color3.fromRGB(0,0,0)
-    shadow.BackgroundTransparency = 0.75
-    shadow.ZIndex = mainFrame.ZIndex - 1
-    shadow.Parent = mainFrame
-    local shadowCorner = Instance.new("UICorner")
-    -- Use theme's corner radius directly + offset
-    shadowCorner.CornerRadius = UDim.new(Starlight.Theme.CornerRadius.Scale, Starlight.Theme.CornerRadius.Offset + 2) -- Line 229 area
-    shadowCorner.Parent = shadow
-
-    -- Top Bar (Optional)
+    -- Top Bar
     local topBar
     if config.ShowTopbar then
         topBar = Instance.new("Frame")
         topBar.Name = "TitleBar"
         topBar.Size = UDim2.new(1, 0, 0, config.TopbarHeight)
-        topBar.LayoutOrder = -1 -- Ensure it's above content
+        topBar.Position = UDim2.new(0, 0, 0, 0)
+        ApplyThemeStyle(topBar, "TitleBar")
         topBar.Parent = mainFrame
-        task.defer(ApplyThemeStyle, topBar, "TitleBar") -- Defer topBar styling
 
+        -- Icon
+        local titleIcon
+        if config.Icon then
+            titleIcon = CreateIcon(config.Icon, topBar,
+                UDim2.fromOffset(config.TopbarHeight * 0.6, config.TopbarHeight * 0.6),
+                UDim2.new(0, Cosmic.SelectedTheme.Padding or 10, 0.5, 0),
+                Cosmic.SelectedTheme.TextColor)
+            titleIcon.AnchorPoint = Vector2.new(0, 0.5)
+        end
+
+        -- Title Label
         local titleLabel = Instance.new("TextLabel")
         titleLabel.Name = "TitleLabel"
-        titleLabel.Size = UDim2.new(1, -80, 1, 0) -- Leave space for buttons
-        titleLabel.Position = UDim2.new(0, Starlight.Theme.Padding.Offset, 0, 0)
-        titleLabel.BackgroundTransparency = 1
-        titleLabel.Font = Starlight.Theme.FontTitle
-        titleLabel.TextSize = Starlight.Theme.TextSizeTitle
-        titleLabel.TextColor3 = Starlight.Theme.Text
+        local titleX = (titleIcon and titleIcon.AbsoluteSize.X + (Cosmic.SelectedTheme.Padding or 10) * 1.5) or (Cosmic.SelectedTheme.Padding or 10)
+        local controlsWidth = (config.TopbarHeight * 3) + (Cosmic.SelectedTheme.Padding or 10) -- Approx width for 3 buttons
+        titleLabel.Size = UDim2.new(1, -(titleX + controlsWidth), 1, 0)
+        titleLabel.Position = UDim2.new(0, titleX, 0, 0)
+        titleLabel.Font = Cosmic.SelectedTheme.FontTitle or Enum.Font.SourceSansBold
+        titleLabel.TextSize = Cosmic.SelectedTheme.TextSizeTitle or 18
+        titleLabel.TextColor3 = Cosmic.SelectedTheme.TextColor
         titleLabel.Text = config.Title
         titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+        titleLabel.BackgroundTransparency = 1
         titleLabel.Parent = topBar
 
-        -- Close Button (Example)
-        local closeButton = Instance.new("ImageButton")
-        closeButton.Name = "CloseButton"
-        closeButton.Size = UDim2.new(0, config.TopbarHeight - 8, 0, config.TopbarHeight - 8)
-        closeButton.Position = UDim2.new(1, -config.TopbarHeight + 4, 0.5, -(config.TopbarHeight - 8)/2)
-        closeButton.BackgroundTransparency = 1
-        closeButton.Image = Starlight.Theme.Icons.Close
-        closeButton.ImageColor3 = Starlight.Theme.TextSecondary
-        closeButton.Parent = topBar
+        -- Topbar Controls (Hide, Minimize/Maximize, Search, Settings)
+        local controlButtonSize = config.TopbarHeight - (Cosmic.SelectedTheme.SmallPadding or 5) * 2
+        local controlX = -(controlButtonSize + (Cosmic.SelectedTheme.SmallPadding or 5))
+        local controlY = UDim.new(0.5, -controlButtonSize / 2)
 
-        closeButton.MouseEnter:Connect(function() PlayTween(closeButton, { ImageColor3 = Starlight.Theme.Error }, 0.1) end)
-        closeButton.MouseLeave:Connect(function() PlayTween(closeButton, { ImageColor3 = Starlight.Theme.TextSecondary }, 0.1) end)
-        closeButton.MouseButton1Click:Connect(function() window:Hide() end)
+        -- Hide Button (Rayfield's Minimize equivalent)
+        local hideButton = Instance.new("ImageButton")
+        hideButton.Name = "HideButton"
+        hideButton.Size = UDim2.fromOffset(controlButtonSize, controlButtonSize)
+        hideButton.Position = UDim2.new(1, controlX, controlY.Scale, controlY.Offset)
+        hideButton.BackgroundTransparency = 1
+        hideButton.Image = Cosmic.SelectedTheme.Icons.Minimize or "rbxassetid://5108077471"
+        hideButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or theme.TextColor
+        hideButton.ScaleType = Enum.ScaleType.Fit
+        hideButton.Parent = topBar
+        controlX = controlX - (controlButtonSize + (Cosmic.SelectedTheme.SmallPadding or 5))
+
+        -- Minimize/Maximize Button
+        local sizeButton = Instance.new("ImageButton")
+        sizeButton.Name = "SizeButton"
+        sizeButton.Size = UDim2.fromOffset(controlButtonSize, controlButtonSize)
+        sizeButton.Position = UDim2.new(1, controlX, controlY.Scale, controlY.Offset)
+        sizeButton.BackgroundTransparency = 1
+        sizeButton.Image = Cosmic.SelectedTheme.Icons.Restore or "rbxassetid://10137941941" -- Start assuming maximized
+        sizeButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or theme.TextColor
+        sizeButton.ScaleType = Enum.ScaleType.Fit
+        sizeButton.Parent = topBar
+        controlX = controlX - (controlButtonSize + (Cosmic.SelectedTheme.SmallPadding or 5))
+
+        -- Search Button
+        local searchButton = Instance.new("ImageButton")
+        searchButton.Name = "SearchButton"
+        searchButton.Size = UDim2.fromOffset(controlButtonSize, controlButtonSize)
+        searchButton.Position = UDim2.new(1, controlX, controlY.Scale, controlY.Offset)
+        searchButton.BackgroundTransparency = 1
+        searchButton.Image = Cosmic.SelectedTheme.Icons.Search or "rbxassetid://6031069821"
+        searchButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or theme.TextColor
+        searchButton.ScaleType = Enum.ScaleType.Fit
+        searchButton.Parent = topBar
+        controlX = controlX - (controlButtonSize + (Cosmic.SelectedTheme.SmallPadding or 5))
+
+        -- Settings Button (Optional - Add logic to show/hide based on file system availability)
+        local settingsButton = Instance.new("ImageButton")
+        settingsButton.Name = "SettingsButton"
+        settingsButton.Size = UDim2.fromOffset(controlButtonSize, controlButtonSize)
+        settingsButton.Position = UDim2.new(1, controlX, controlY.Scale, controlY.Offset)
+        settingsButton.BackgroundTransparency = 1
+        settingsButton.Image = Cosmic.SelectedTheme.Icons.Settings or "rbxassetid://6031069821"
+        settingsButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or theme.TextColor
+        settingsButton.ScaleType = Enum.ScaleType.Fit
+        settingsButton.Parent = topBar
+        -- settingsButton.Visible = (writefile and isfile) -- Conditionally show
+
+        -- Button Hover Effects (like Rayfield)
+        local function setupControlHover(button)
+            table.insert(window.Connections, button.MouseEnter:Connect(function() PlayTween(button, { ImageColor3 = Cosmic.SelectedTheme.TextColor }, 0.1) end))
+            table.insert(window.Connections, button.MouseLeave:Connect(function() PlayTween(button, { ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor }, 0.1) end))
+        end
+        setupControlHover(hideButton)
+        setupControlHover(sizeButton)
+        setupControlHover(searchButton)
+        setupControlHover(settingsButton)
+
+        -- Button Actions
+        table.insert(window.Connections, hideButton.MouseButton1Click:Connect(function() window:Hide(true) end)) -- Pass true for notification
+        table.insert(window.Connections, sizeButton.MouseButton1Click:Connect(function() if window.IsMinimized then window:Maximize() else window:Minimize() end end))
+        table.insert(window.Connections, searchButton.MouseButton1Click:Connect(function() window:ToggleSearch() end))
+        table.insert(window.Connections, settingsButton.MouseButton1Click:Connect(function() window:ShowSettingsTab() end))
 
         -- Dragging Logic
         if config.Draggable then
-            topBar.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                    if window.Visible then -- Only allow dragging if visible
-                        window.IsDragging = true
-                        window.DragStart = input.Position
-                        window.StartPos = mainFrame.Position
-                        local connection
-                        connection = input.Changed:Connect(function()
-                            if input.UserInputState == Enum.UserInputState.End then
-                                window.IsDragging = false
-                                window.DragStart = nil
-                                window.StartPos = nil
-                                if connection then connection:Disconnect() end
-                            end
-                        end)
-                    end
-                end
-            end)
-
-            UserInputService.InputChanged:Connect(function(input) -- Use UserInputService for smoother dragging
-                if (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) and window.IsDragging and window.DragStart then
-                    local delta = input.Position - window.DragStart
-                    local newPos = UDim2.new(window.StartPos.X.Scale, window.StartPos.X.Offset + delta.X,
-                                             window.StartPos.Y.Scale, window.StartPos.Y.Offset + delta.Y)
-
-                    -- Clamp position to screen bounds (basic example)
-                    local viewportSize = workspace.CurrentCamera.ViewportSize
-                    local guiInset = GuiService:GetGuiInset()
-                    local absSize = mainFrame.AbsoluteSize
-                    newPos = UDim2.new(
-                        newPos.X.Scale, math.clamp(newPos.X.Offset, -absSize.X + 50, viewportSize.X - 50), -- Allow slight offscreen
-                        newPos.Y.Scale, math.clamp(newPos.Y.Offset, guiInset.Y, viewportSize.Y - guiInset.Y - absSize.Y) -- Respect top bar inset
-                    )
-                    mainFrame.Position = newPos
-                end
-            end)
+            local dragConnections = makeDraggable(mainFrame, topBar, true, dragBar, {config.Size.Y.Offset / 2 + 10}) -- Offset drag bar below
+            for _, conn in ipairs(dragConnections) do table.insert(window.Connections, conn) end
         end
     end
+
+    -- Search Bar Frame (Initially Hidden)
+    local searchFrame = Instance.new("Frame")
+    searchFrame.Name = "SearchFrame"
+    searchFrame.Size = UDim2.new(1, -(Cosmic.SelectedTheme.Padding or 10)*2, 0, 35)
+    searchFrame.Position = UDim2.new(0, Cosmic.SelectedTheme.Padding or 10, 0, (config.ShowTopbar and config.TopbarHeight or 0) + 5)
+    searchFrame.BackgroundTransparency = 1
+    searchFrame.Visible = false
+    searchFrame.ClipsDescendants = true
+    searchFrame.ZIndex = 3
+    ApplyThemeStyle(searchFrame, "TextBox") -- Use TextBox style as base
+    searchFrame.Parent = mainFrame
+
+    local searchIcon = CreateIcon(Cosmic.SelectedTheme.Icons.Search or "rbxassetid://6031069821", searchFrame,
+        UDim2.fromOffset(20, 20),
+        UDim2.new(0, 5, 0.5, 0),
+        Cosmic.SelectedTheme.PlaceholderColor)
+    searchIcon.AnchorPoint = Vector2.new(0, 0.5)
+
+    local searchInput = Instance.new("TextBox")
+    searchInput.Name = "SearchInput"
+    searchInput.Size = UDim2.new(1, -30, 1, 0)
+    searchInput.Position = UDim2.new(0, 28, 0, 0)
+    searchInput.PlaceholderText = "Search elements..."
+    searchInput.ClearTextOnFocus = false
+    searchInput.Text = ""
+    ApplyThemeStyle(searchInput, "TextBox") -- Apply text styles etc.
+    searchInput.BackgroundTransparency = 1 -- Make textbox itself transparent
+    searchInput.BorderSizePixel = 0
+    if searchInput:FindFirstChild("BaseStroke") then searchInput.BaseStroke:Destroy() end -- Remove inner stroke
+    if searchInput:FindFirstChildWhichIsA("UICorner") then searchInput:FindFirstChildWhichIsA("UICorner"):Destroy() end -- Remove inner corner
+    searchInput.Parent = searchFrame
 
     -- Tab Bar Area
     local tabBar = Instance.new("Frame")
     tabBar.Name = "TabBar"
-    tabBar.Size = UDim2.new(1, 0, 0, 40) -- Example height
-    tabBar.Position = UDim2.new(0, 0, config.ShowTopbar and config.TopbarHeight or 0, 0)
-    tabBar.BackgroundTransparency = 1 -- Transparent background, relies on mainFrame
+    tabBar.Size = UDim2.new(1, 0, 0, 40) -- Standard tab bar height
+    tabBar.Position = UDim2.new(0, 0, 0, (config.ShowTopbar and config.TopbarHeight or 0)) -- Position below topbar or search
+    tabBar.BackgroundTransparency = 1
     tabBar.Parent = mainFrame
 
     local tabList = Instance.new("UIListLayout")
     tabList.FillDirection = Enum.FillDirection.Horizontal
     tabList.SortOrder = Enum.SortOrder.LayoutOrder
     tabList.VerticalAlignment = Enum.VerticalAlignment.Center
-    tabList.Padding = Starlight.Theme.SmallPadding
+    tabList.Padding = UDim.new(0, Cosmic.SelectedTheme.SmallPadding or 5)
     tabList.Parent = tabBar
 
     -- Content Area
     local contentFrame = Instance.new("Frame")
     contentFrame.Name = "ContentFrame"
-    contentFrame.Size = UDim2.new(1, 0, 1, -(config.ShowTopbar and config.TopbarHeight or 0) - tabBar.Size.Y.Offset)
-    contentFrame.Position = UDim2.new(0, 0, 0, tabBar.Position.Y.Offset + tabBar.Size.Y.Offset)
+    local contentY = tabBar.Position.Y.Offset + tabBar.Size.Y.Offset + (Cosmic.SelectedTheme.Padding or 10)
+    contentFrame.Size = UDim2.new(1, -(Cosmic.SelectedTheme.Padding or 10) * 2, 1, -(contentY + (Cosmic.SelectedTheme.Padding or 10)))
+    contentFrame.Position = UDim2.new(0, Cosmic.SelectedTheme.Padding or 10, 0, contentY)
     contentFrame.BackgroundTransparency = 1
     contentFrame.ClipsDescendants = true
     contentFrame.Parent = mainFrame
 
     local pageLayout = Instance.new("UIPageLayout")
     pageLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    pageLayout.TweenTime = Starlight.Theme.AnimationSpeed * 1.5 -- Slightly longer tween for page transitions
-    pageLayout.EasingStyle = Starlight.Theme.EasingStyle
-    pageLayout.EasingDirection = Starlight.Theme.EasingDirection
+    pageLayout.TweenTime = (Cosmic.SelectedTheme.AnimationSpeed or 0.2) * 1.5
+    pageLayout.EasingStyle = Cosmic.SelectedTheme.EasingStyle or Enum.EasingStyle.Quad
+    pageLayout.EasingDirection = Cosmic.SelectedTheme.EasingDirection or Enum.EasingDirection.Out
     pageLayout.Parent = contentFrame
 
-    -- Assign GUI References to window object
+    -- Notifications Area (like Rayfield)
+    local notificationsFrame = Instance.new("Frame")
+    notificationsFrame.Name = "Notifications"
+    notificationsFrame.Size = UDim2.new(0, 300, 1, 0) -- Fixed width, full height
+    notificationsFrame.Position = UDim2.new(1, 10, 0, 0) -- Position outside right
+    notificationsFrame.BackgroundTransparency = 1
+    notificationsFrame.ZIndex = 10
+    notificationsFrame.Parent = screenGui
+
+    local notificationLayout = Instance.new("UIListLayout")
+    notificationLayout.FillDirection = Enum.FillDirection.Vertical
+    notificationLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    notificationLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+    notificationLayout.Padding = UDim.new(0, 8)
+    notificationLayout.Parent = notificationsFrame
+
+    -- Mobile Prompt (like Rayfield)
+    local mobilePrompt = Instance.new("TextButton")
+    mobilePrompt.Name = "MobilePrompt"
+    mobilePrompt.Size = UDim2.new(0, 120, 0, 30)
+    mobilePrompt.AnchorPoint = Vector2.new(0.5, 0)
+    mobilePrompt.Position = UDim2.new(0.5, 0, 0, -50) -- Start hidden above screen
+    mobilePrompt.Text = "Show " .. config.Name
+    mobilePrompt.Visible = false -- Initially hidden
+    mobilePrompt.ZIndex = 100
+    mobilePrompt.AutoButtonColor = false
+    ApplyThemeStyle(mobilePrompt, "Button") -- Use button style
+    mobilePrompt.BackgroundTransparency = 0.3
+    mobilePrompt.TextTransparency = 0.3
+    mobilePrompt.TextSize = Cosmic.SelectedTheme.TextSizeSmall or 13
+    mobilePrompt.TextColor3 = Cosmic.SelectedTheme.TextColor
+    mobilePrompt.Parent = screenGui
+
+    table.insert(window.Connections, mobilePrompt.MouseButton1Click:Connect(function() window:Show() end))
+
+    -- Assign References
     window.ScreenGui = screenGui
     window.MainFrame = mainFrame
     window.Shadow = shadow
     window.TitleBar = topBar
     window.TabBar = tabBar
-    window.TabListLayout = tabList
     window.ContentFrame = contentFrame
     window.PageLayout = pageLayout
+    window.NotificationsFrame = notificationsFrame
+    window.NotificationLayout = notificationLayout
+    window.DragBar = dragBar -- Reference to the taptic bar container
+    window.MobilePrompt = mobilePrompt
+    window.SearchFrame = searchFrame
+    window.SearchInput = searchInput
+    window.SizeButton = sizeButton -- Reference to minimize/maximize button
 
-    -- Methods
-    function window:Show()
-        if self.Visible then return end
-        self.Visible = true
-        self.ScreenGui.Enabled = true -- Enable the whole ScreenGui
-        self.MainFrame.Visible = true
+    -- Add Theme Update Connection
+    function window:UpdateElementThemes()
+        -- Update window elements
+        ApplyThemeStyle(mainFrame, "Window")
+        shadow.ImageColor3 = Cosmic.SelectedTheme.Shadow or Color3.fromRGB(0,0,0)
+        dragBarCosmetic.BackgroundColor3 = Cosmic.SelectedTheme.Accent or Color3.fromRGB(0, 220, 255)
+        if topBar then
+            ApplyThemeStyle(topBar, "TitleBar")
+            if titleIcon then titleIcon.ImageColor3 = Cosmic.SelectedTheme.TextColor end
+            titleLabel.TextColor3 = Cosmic.SelectedTheme.TextColor
+            hideButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor
+            sizeButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor
+            searchButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor
+            settingsButton.ImageColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor
+        end
+        ApplyThemeStyle(searchFrame, "TextBox")
+        searchIcon.ImageColor3 = Cosmic.SelectedTheme.PlaceholderColor
+        ApplyThemeStyle(searchInput, "TextBox")
+        ApplyThemeStyle(mobilePrompt, "Button")
 
-        -- Animation: Fade In + Scale Up from center
-        self.MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-        self.MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0) -- Center temporarily
-        -- Multiply components individually
-        self.MainFrame.Size = UDim2.new(config.Size.X.Scale * 0.9, config.Size.X.Offset * 0.9, config.Size.Y.Scale * 0.9, config.Size.Y.Offset * 0.9)
-        self.MainFrame.Transparency = 1
-        self.Shadow.BackgroundTransparency = 1
-
-        PlayTween(self.MainFrame, {
-            Transparency = 0,
-            Size = config.Size,
-            Position = config.Position or UDim2.new(0.5, -config.Size.X.Offset / 2, 0.5, -config.Size.Y.Offset / 2), -- Restore original position
-            AnchorPoint = Vector2.new(0, 0) -- Restore anchor point
-        })
-        PlayTween(self.Shadow, { BackgroundTransparency = 0.75 })
-    end
-
-    function window:Hide()
-        if not self.Visible then return end
-        self.Visible = false
-
-        -- Animation: Fade Out + Scale Down to center
-        self.MainFrame.AnchorPoint = Vector2.new(0.5, 0.5) -- Center anchor for scaling
-        local currentPos = self.MainFrame.AbsolutePosition + self.MainFrame.AbsoluteSize * 0.5
-        local currentPosUDim = UDim2.fromOffset(currentPos.X, currentPos.Y)
-
-        local hideTween = PlayTween(self.MainFrame, {
-            Transparency = 1,
-            -- Multiply components individually
-            Size = UDim2.new(config.Size.X.Scale * 0.9, config.Size.X.Offset * 0.9, config.Size.Y.Scale * 0.9, config.Size.Y.Offset * 0.9),
-            Position = currentPosUDim -- Stay centered while scaling
-        })
-        PlayTween(self.Shadow, { BackgroundTransparency = 1 })
-
-        hideTween.Completed:Connect(function()
-            if not self.Visible then -- Check again in case shown during animation
-                self.MainFrame.Visible = false
-                self.ScreenGui.Enabled = false -- Disable ScreenGui when fully hidden
-                -- Reset properties for next show
-                self.MainFrame.Size = config.Size
-                self.MainFrame.Position = config.Position or UDim2.new(0.5, -config.Size.X.Offset / 2, 0.5, -config.Size.Y.Offset / 2)
-                self.MainFrame.AnchorPoint = Vector2.new(0, 0)
+        -- Update tabs
+        for _, tab in ipairs(window.Tabs) do
+            if tab.IsActive then
+                ApplyThemeStyle(tab.Button, "TabButtonActive")
+                tab.Label.TextColor3 = Cosmic.SelectedTheme.SelectedTabTextColor
+                tab.Icon.ImageColor3 = Cosmic.SelectedTheme.SelectedTabTextColor
+            else
+                ApplyThemeStyle(tab.Button, "TabButton")
+                tab.Label.TextColor3 = Cosmic.SelectedTheme.TabTextColor
+                tab.Icon.ImageColor3 = Cosmic.SelectedTheme.TabTextColor
             end
-        end)
-    end
-
-    function window:Toggle()
-        if self.Visible then self:Hide() else self:Show() end
-    end
-
-    function window:Destroy()
-        self:Hide() -- Animate out first
-        task.wait(Starlight.Theme.AnimationSpeed + 0.1) -- Wait for animation
-        if self.ScreenGui then self.ScreenGui:Destroy() end
-        -- Clean up references
-        Starlight.ActiveWindows[self] = nil
-        for k in pairs(self) do self[k] = nil end
-        print("Starlight: Window destroyed.")
-    end
-
-    function window:AddTab(config)
-        -- config = { Name = "Tab Name", Icon = "rbxassetid://..." }
-        local tabConfig = config or {}
-        tabConfig.Name = tabConfig.Name or "Tab" -- Default name if not provided
-
-        local tab = {}
-        local tabOrder = #self.Tabs + 1
-
-        -- Tab Button
-        local tabButton = Instance.new("TextButton")
-        tabButton.Name = tabConfig.Name:gsub("%s+", "") .. "TabButton"
-        tabButton.Size = UDim2.new(0, 100, 1, -Starlight.Theme.SmallPadding.Offset * 2) -- Auto width based on text later?
-        tabButton.Text = "  " .. tabConfig.Name -- Padding for icon
-        tabButton.LayoutOrder = tabOrder
-        tabButton.AutoButtonColor = false
-        tabButton.Parent = self.TabBar
-        ApplyThemeStyle(tabButton, "TabButton")
-        tabButton.TextXAlignment = Enum.TextXAlignment.Left
-        tabButton.TextColor3 = Starlight.Theme.TextSecondary -- Dimmer when inactive
-
-        local tabIcon = CreateIcon(tabConfig.Icon or Starlight.Theme.Icons.DefaultTab, tabButton, UDim2.new(0, 18, 0, 18), UDim2.new(0, Starlight.Theme.SmallPadding.Offset * 2, 0.5, -9), Starlight.Theme.TextSecondary)
-
-        -- Tab Content Page
-        local contentPage = Instance.new("ScrollingFrame") -- Use ScrollingFrame for content
-        contentPage.Name = tabConfig.Name:gsub("%s+", "") .. "Content"
-        contentPage.Size = UDim2.new(1, 0, 1, 0)
-        contentPage.BackgroundTransparency = 1
-        contentPage.BorderSizePixel = 0
-        contentPage.LayoutOrder = tabOrder
-        contentPage.ScrollBarThickness = 6
-        contentPage.ScrollBarImageColor3 = Starlight.Theme.Accent
-        contentPage.ScrollingDirection = Enum.ScrollingDirection.Y
-        contentPage.CanvasSize = UDim2.new(0,0,0,0) -- Auto-sized by layout
-        contentPage.Parent = self.ContentFrame
-
-        local contentLayout = Instance.new("UIListLayout")
-        contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
-        contentLayout.Padding = Starlight.Theme.Padding
-        contentLayout.Parent = contentPage
-        -- Auto-canvas size
-        contentLayout.Changed:Connect(function()
-            contentPage.CanvasSize = UDim2.new(0, 0, 0, contentLayout.AbsoluteContentSize.Y)
-        end)
-
-        -- Tab Object
-        tab.Title = tabConfig.Name
-        tab.Button = tabButton
-        tab.Icon = tabIcon
-        tab.ContentPage = contentPage
-        tab.ContentLayout = contentLayout
-        tab.IsActive = false
-        tab.Elements = {} -- Elements specific to this tab
-
-        -- Add methods to the tab object (closures)
-        function tab:AddButton(btnConfig) return Starlight:_CreateButton(self, btnConfig) end
-        function tab:AddToggle(tglConfig) return Starlight:_CreateToggle(self, tglConfig) end
-        function tab:AddDropdown(drpConfig) return Starlight:_CreateDropdown(self, drpConfig) end
-        function tab:AddInput(inpConfig) return Starlight:_CreateInput(self, inpConfig) end
-        function tab:AddLabel(lblConfig) return Starlight:_CreateLabel(self, lblConfig) end
-        function tab:AddParagraph(paraConfig) return Starlight:_CreateLabel(self, paraConfig) end -- Alias for Label
-        function tab:AddSection(title) return Starlight:_CreateSection(self, title) end
-        function tab:AddSlider(sldConfig) return Starlight:_CreateSlider(self, sldConfig) end
-        -- ... Add other element creation methods here ...
-
-        table.insert(self.Tabs, tab) -- Add the tab object to the window's list
-
-        -- Activate the first tab added
-        if tabOrder == 1 then
-            self:SetActiveTab(tab)
-        else
-            -- Ensure inactive tabs are styled correctly initially
-            tabButton.BackgroundColor3 = Starlight.Theme.Secondary
-            tabButton.TextColor3 = Starlight.Theme.TextSecondary
-            tabIcon.ImageColor3 = Starlight.Theme.TextSecondary
-            local stroke = tabButton:FindFirstChildWhichIsA("UIStroke")
-            if stroke then stroke.Transparency = 1 end
+            -- Update elements within tab
+            for _, element in ipairs(tab.Elements) do
+                if element.UpdateTheme then element:UpdateTheme() end
+            end
         end
-
-        -- Add click listener to the button AFTER the tab object is created
-        tabButton.MouseButton1Click:Connect(function()
-            self:SetActiveTab(tab)
-        end)
-
-        return tab
-    end
-
-    function window:SetActiveTab(targetTab)
-        if self.ActiveTab == targetTab then return end -- Already active
-
-        -- Deactivate previous tab
-        if self.ActiveTab then
-            self.ActiveTab.IsActive = false
-            PlayTween(self.ActiveTab.Button, { BackgroundColor3 = Starlight.Theme.Secondary, TextColor3 = Starlight.Theme.TextSecondary }, 0.15)
-            PlayTween(self.ActiveTab.Icon, { ImageColor3 = Starlight.Theme.TextSecondary }, 0.15)
-            if self.ActiveTab.Button:FindFirstChildWhichIsA("UIStroke") then PlayTween(self.ActiveTab.Button.UIStroke, { Transparency = 1 }, 0.15) end -- Hide stroke
+         -- Update settings elements if any
+        for _, element in ipairs(window.Elements) do
+             if element.UpdateTheme then element:UpdateTheme() end
         end
-
-        -- Activate new tab
-        targetTab.IsActive = true
-        self.ActiveTab = targetTab
-        PlayTween(targetTab.Button, { BackgroundColor3 = Starlight.Theme.Background, TextColor3 = Starlight.Theme.Accent }, 0.15) -- Use main background, accent text
-        PlayTween(targetTab.Icon, { ImageColor3 = Starlight.Theme.Accent }, 0.15)
-        if targetTab.Button:FindFirstChildWhichIsA("UIStroke") then PlayTween(targetTab.Button.UIStroke, { Transparency = 0, Color = Starlight.Theme.Accent }, 0.15) end -- Show accent stroke
-
-        -- Switch page layout
-        self.PageLayout:JumpTo(targetTab.ContentPage)
     end
 
-    -- Initial visibility
+    -- Initial Load/Setup
+    Cosmic.ActiveWindows[window] = true
+    print("Cosmic UI: Window '" .. config.Title .. "' created.")
+
+    -- Configuration Loading Notice (like Rayfield)
+    if window.CEnabled then
+        local notice = Instance.new("Frame")
+        notice.Name = "ConfigNotice"
+        notice.Size = UDim2.new(0, 280, 0, 35)
+        notice.AnchorPoint = Vector2.new(0.5, 1)
+        notice.Position = UDim2.new(0.5, 0, 0, -10) -- Position above topbar
+        notice.BackgroundTransparency = 0.5
+        notice.ZIndex = 10
+        ApplyThemeStyle(notice, "Label") -- Use label style
+        notice.Parent = mainFrame
+
+        local noticeLabel = Instance.new("TextLabel")
+        noticeLabel.Name = "Title"
+        noticeLabel.Size = UDim2.fromScale(1, 1)
+        noticeLabel.BackgroundTransparency = 1
+        noticeLabel.Text = "Loading Configuration..."
+        noticeLabel.Font = Cosmic.SelectedTheme.Font or Enum.Font.SourceSans
+        noticeLabel.TextSize = Cosmic.SelectedTheme.TextSizeSmall or 13
+        noticeLabel.TextColor3 = Cosmic.SelectedTheme.TextColor
+        noticeLabel.TextTransparency = 0.1
+        noticeLabel.Parent = notice
+        window.ConfigNotice = notice -- Store reference
+
+        -- Fade in notice
+        PlayTween(notice, {BackgroundTransparency = 0.5, Position = UDim2.new(0.5, 0, 0, -10)}, 0.5)
+        PlayTween(noticeLabel, {TextTransparency = 0.1}, 0.5)
+    end
+
+    -- Key System Check (Placeholder - Needs full UI and logic)
+    if config.KeySystem then
+        local keyValid = window:_CheckKeySystem()
+        if not keyValid then
+            -- Show Key UI, handle input, validation etc.
+            warn("CosmicUI: Key System validation failed or not implemented. UI loading aborted.")
+            window:Destroy() -- Abort if key fails
+            return nil -- Indicate failure
+        end
+    end
+
+    -- Discord Invite (like Rayfield)
+    if config.Discord.Enabled and config.Discord.Invite and not useStudio then
+        window:_HandleDiscordInvite()
+    end
+
+    -- Auto-show or start hidden
     if config.StartVisible then
-        window:Show()
+        window:Show(true) -- Show immediately without animation
     else
-        window.ScreenGui.Enabled = false -- Keep disabled if not starting visible
+        -- Ensure correct initial hidden state without animation
+        mainFrame.Visible = false
+        screenGui.Enabled = false
+        dragBar.Visible = false
+        window.Visible = false
     end
 
-    Starlight.ActiveWindows[window] = true -- Register the window
-    print("Starlight: Window '" .. config.Title .. "' created.")
+    -- Load Configuration after a delay (like Rayfield)
+    task.delay(4, function()
+        if window and window.CEnabled then
+            window:LoadConfiguration()
+        end
+        Cosmic.GlobalLoaded = true
+        -- Fade out notice
+        if window and window.ConfigNotice then
+            PlayTween(window.ConfigNotice, {BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, -50)}, 0.5)
+            PlayTween(window.ConfigNotice.Title, {TextTransparency = 1}, 0.3)
+            task.delay(0.5, function() if window.ConfigNotice then window.ConfigNotice:Destroy() window.ConfigNotice = nil end end)
+        end
+    end)
+
+    -- Setup Hide Hotkey
+    local hideHotkey = settingsTable and settingsTable.General.rayfieldOpen.Value or "K" -- Use Rayfield's setting name
+    table.insert(window.Connections, UserInputService.InputBegan:Connect(function(input, processed)
+        if not processed and input.KeyCode == Enum.KeyCode[hideHotkey] then
+            window:ToggleVisibility()
+        end
+    end))
+
     return window
 end
 
+--[[ Window Methods ]]--
 
---[[ Element Creation Functions (Internal - Called by Tab methods) ]]--
+function Cosmic:Show(immediate)
+    if self.Visible then return end
+    self.Visible = true
+    self.ScreenGui.Enabled = true
+    self.MainFrame.Visible = true
+    self.DragBar.Visible = self.Config.Draggable -- Show drag bar only if draggable
 
--- Button Element
-function Starlight:_CreateButton(parentTab, config)
-    -- config = { Name = "Action", Text = "Click Me", Tooltip = "Performs an action", Callback = function() end }
-    local btnConfig = config or {}
-    btnConfig.Name = btnConfig.Name or "Button"
-    btnConfig.Text = btnConfig.Text or "Button"
-    btnConfig.Callback = btnConfig.Callback or function() print("Button '"..btnConfig.Name.."' clicked.") end
+    local targetPos = self.Config.Position or UDim2.new(0.5, 0, 0.5, 0)
+    local startPos = targetPos + UDim2.fromOffset(0, 30) -- Start lower
 
-    local elementOrder = #parentTab.Elements + 1
-
-    local buttonFrame = Instance.new("Frame") -- Use a frame for better layout control if needed later
-    buttonFrame.Name = btnConfig.Name:gsub("%s+", "") .. "ButtonFrame"
-    buttonFrame.Size = UDim2.new(1, 0, 0, Starlight.Theme.ElementHeight) -- Full width, standard height
-    buttonFrame.BackgroundTransparency = 1 -- Frame is transparent
-    buttonFrame.LayoutOrder = elementOrder
-    buttonFrame.Parent = parentTab.ContentPage -- Parent to the scrolling frame
-
-    local button = Instance.new("TextButton")
-    button.Name = "Button"
-    button.Size = UDim2.new(1, 0, 1, 0) -- Fill the frame
-    button.Text = btnConfig.Text
-    button.AutoButtonColor = false
-    button.Parent = buttonFrame
-    ApplyThemeStyle(button, "Button")
-    button.TextXAlignment = Enum.TextXAlignment.Center
-
-    -- Tooltip (Simple example using MouseEnter/MouseLeave on the frame)
-    if btnConfig.Tooltip then
-        -- TODO: Implement a proper tooltip display system (e.g., a shared tooltip frame)
-        buttonFrame.MouseEnter:Connect(function() print("Tooltip:", btnConfig.Tooltip) end)
-        buttonFrame.MouseLeave:Connect(function() print("Tooltip cleared") end)
+    -- Hide mobile prompt if showing
+    if self.MobilePrompt.Visible then
+        PlayTween(self.MobilePrompt, {Position = UDim2.new(0.5, 0, 0, -50), BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
+        task.delay(0.3, function() if self.MobilePrompt then self.MobilePrompt.Visible = false end end)
     end
 
-    -- Interaction Animations
-    local originalColor = button.BackgroundColor3
-    local scale = Instance.new("UIScale") -- Add UIScale for animations
-    scale.Parent = button
+    if immediate or self.IsMinimized then -- If minimized, just resize, don't animate position/transparency
+        self.MainFrame.Position = targetPos
+        self.MainFrame.Transparency = 0
+        self.Shadow.ImageTransparency = 0.6
+        if self.IsMinimized then
+             self:Maximize(true) -- Maximize immediately
+        end
+    else
+        self.MainFrame.Position = startPos
+        self.MainFrame.Transparency = 1
+        self.Shadow.ImageTransparency = 1
+        PlayTween(self.MainFrame, { Position = targetPos, Transparency = 0 }, nil, Enum.EasingStyle.Back)
+        PlayTween(self.Shadow, { ImageTransparency = 0.6 }, 0.4) -- Fade in shadow
+    end
+    self.OriginalPosition = targetPos -- Store intended position
+end
 
-    button.MouseEnter:Connect(function()
-        PlayTween(button, { BackgroundColor3 = originalColor:Lerp(Color3.new(1,1,1), 0.1) }, 0.1) -- Slightly lighter
-        PlayTween(scale, { Scale = 1.02 }, 0.1) -- Slight grow
-    end)
-    button.MouseLeave:Connect(function()
-        PlayTween(button, { BackgroundColor3 = originalColor }, 0.1)
-        PlayTween(scale, { Scale = 1.0 }, 0.1)
-    end)
-    button.MouseButton1Down:Connect(function()
-        PlayTween(button, { BackgroundColor3 = originalColor:Lerp(Color3.new(0,0,0), 0.1) }, 0.05) -- Slightly darker
-        PlayTween(scale, { Scale = 0.98 }, 0.05) -- Slight shrink
-    end)
-    button.MouseButton1Up:Connect(function()
-        PlayTween(button, { BackgroundColor3 = originalColor:Lerp(Color3.new(1,1,1), 0.1) }, 0.1) -- Back to hover state if mouse is still over
-        PlayTween(scale, { Scale = 1.02 }, 0.1)
-    end)
+function Cosmic:Hide(notify)
+    if not self.Visible then return end
+    self.Visible = false
 
-    -- Callback Execution
-    button.MouseButton1Click:Connect(function()
-        local success, err = pcall(btnConfig.Callback)
-        if not success then
-            warn("Starlight: Error in button callback for '"..btnConfig.Name.."':", err)
-            -- Optional: Visual error feedback on the button
-            local originalBtnColor = button.BackgroundColor3
-            button.BackgroundColor3 = Starlight.Theme.Error
-            PlayTween(button, { BackgroundColor3 = originalBtnColor }, 1.0) -- Flash error color
+    local currentPos = self.MainFrame.Position
+    local targetPos = currentPos + UDim2.fromOffset(0, 30)
+
+    -- Show mobile prompt if touch enabled
+    local useMobilePrompt = UserInputService.TouchEnabled
+    if useMobilePrompt then
+        self.MobilePrompt.Visible = true
+        PlayTween(self.MobilePrompt, {Position = UDim2.new(0.5, 0, 0, 20), BackgroundTransparency = 0.3, TextTransparency = 0.3}, 0.5)
+    end
+
+    if notify and not useMobilePrompt then
+        local hideHotkey = settingsTable and settingsTable.General.rayfieldOpen.Value or "K"
+        self:Notify({Title = "Interface Hidden", Content = `Press ${hideHotkey} to show.`, Duration = 5, Icon = Cosmic.SelectedTheme.Icons.Minimize})
+    elseif notify and useMobilePrompt then
+         self:Notify({Title = "Interface Hidden", Content = "Tap 'Show " .. self.Config.Name .. "' to show.", Duration = 5, Icon = Cosmic.SelectedTheme.Icons.Minimize})
+    end
+
+    local function OnHideComplete()
+        if not self.Visible then
+            self.MainFrame.Visible = false
+            self.ScreenGui.Enabled = false
+            self.DragBar.Visible = false
+            -- Don't reset position, keep it where it was for potential minimize state
+        end
+    end
+
+    PlayTween(self.MainFrame, { Position = targetPos, Transparency = 1 }, 0.3)
+    local shadowTween = PlayTween(self.Shadow, { ImageTransparency = 1 }, 0.3)
+    table.insert(self.Connections, shadowTween.Completed:Connect(OnHideComplete))
+end
+
+function Cosmic:ToggleVisibility()
+    if self.Visible then self:Hide(true) else self:Show() end
+end
+
+function Cosmic:Minimize()
+    if self.IsMinimized or not self.Visible then return end
+    self.IsMinimized = true
+    self.OriginalSize = self.MainFrame.Size -- Store current size before minimizing
+    self.OriginalPosition = self.MainFrame.Position -- Store current position
+
+    local minimizedHeight = self.Config.TopbarHeight or 35
+    local targetSize = UDim2.new(self.OriginalSize.X.Scale, self.OriginalSize.X.Offset, 0, minimizedHeight)
+
+    -- Update button icon
+    if self.SizeButton then PlayTween(self.SizeButton, {Image = Cosmic.SelectedTheme.Icons.Maximize or "rbxassetid://11036884234"}, 0.1) end
+
+    -- Hide content, tabs
+    self.ContentFrame.Visible = false
+    self.TabBar.Visible = false
+    if self.SearchOpen then self:ToggleSearch(true) end -- Force close search immediately
+
+    -- Animate size
+    PlayTween(self.MainFrame, { Size = targetSize }, 0.3)
+    PlayTween(self.Shadow, { Size = UDim2.new(targetSize.X.Scale, targetSize.X.Offset + 20, targetSize.Y.Scale, targetSize.Y.Offset + 20) }, 0.3)
+    if self.TitleBar then PlayTween(self.TitleBar, { Size = UDim2.new(1, 0, 0, minimizedHeight) }, 0.3) end
+
+    -- Adjust drag bar position
+    if self.Config.Draggable then
+        local tapticYOffset = minimizedHeight / 2 + 10
+        PlayTween(self.DragBar, { Position = UDim2.fromOffset(self.MainFrame.Position.X.Offset, self.MainFrame.Position.Y.Offset + tapticYOffset) }, 0.3)
+        -- Update drag offset for future drags while minimized
+        local dragConnections = makeDraggable(self.MainFrame, self.TitleBar, true, self.DragBar, {tapticYOffset})
+        -- Clear old drag connections and add new ones (simplified - ideally manage connections better)
+        -- for _, conn in ipairs(self.Connections) do if conn related to dragging then conn:Disconnect() end end
+        for _, conn in ipairs(dragConnections) do table.insert(self.Connections, conn) end
+    end
+end
+
+function Cosmic:Maximize(immediate)
+    if not self.IsMinimized or not self.Visible then return end
+    self.IsMinimized = false
+
+    local targetSize = self.OriginalSize
+    local speed = immediate and 0.01 or 0.3 -- Very fast if immediate
+
+    -- Update button icon
+    if self.SizeButton then PlayTween(self.SizeButton, {Image = Cosmic.SelectedTheme.Icons.Restore or "rbxassetid://10137941941"}, 0.1) end
+
+    -- Animate size back
+    PlayTween(self.MainFrame, { Size = targetSize }, speed)
+    PlayTween(self.Shadow, { Size = UDim2.new(targetSize.X.Scale, targetSize.X.Offset + 20, targetSize.Y.Scale, targetSize.Y.Offset + 20) }, speed)
+    if self.TitleBar then PlayTween(self.TitleBar, { Size = UDim2.new(1, 0, 0, self.Config.TopbarHeight or 35) }, speed) end
+
+    -- Show content, tabs after slight delay or immediately
+    local function showContent()
+        self.ContentFrame.Visible = true
+        self.TabBar.Visible = true
+    end
+    if immediate then showContent() else task.delay(speed * 0.5, showContent) end
+
+    -- Adjust drag bar position
+    if self.Config.Draggable then
+        local tapticYOffset = targetSize.Y.Offset / 2 + 10
+        PlayTween(self.DragBar, { Position = UDim2.fromOffset(self.MainFrame.Position.X.Offset, self.MainFrame.Position.Y.Offset + tapticYOffset) }, speed)
+        -- Update drag offset
+        local dragConnections = makeDraggable(self.MainFrame, self.TitleBar, true, self.DragBar, {tapticYOffset})
+        -- Clear old drag connections and add new ones
+        for _, conn in ipairs(dragConnections) do table.insert(self.Connections, conn) end
+    end
+end
+
+function Cosmic:Destroy()
+    self:Hide(true) -- Hide immediately
+    Cosmic.ActiveWindows[self] = nil
+    -- Disconnect all stored connections
+    for _, conn in ipairs(self.Connections) do if typeof(conn) == "RBXScriptConnection" then conn:Disconnect() end end
+    for _, conn in ipairs(self.ThemeConnections) do if typeof(conn) == "RBXScriptConnection" then conn:Disconnect() end end
+    self.Connections = {}
+    self.ThemeConnections = {}
+    -- Destroy flagged elements registry entry
+    for flagName, element in pairs(Cosmic.Flags) do
+        if element and element.Window == self then
+            Cosmic.Flags[flagName] = nil
+        end
+    end
+    if self.ScreenGui then self.ScreenGui:Destroy() end
+    -- Clear self table
+    for k in pairs(self) do self[k] = nil end
+    print("Cosmic UI: Window destroyed.")
+end
+
+function Cosmic:ModifyTheme(themeInput, silent)
+    local newTheme
+    if type(themeInput) == "string" and Cosmic.Themes[themeInput] then
+        newTheme = Cosmic.Themes[themeInput]
+    elseif type(themeInput) == "table" then
+        newTheme = themeInput -- Allow custom theme tables
+    else
+        if not silent then warn("CosmicUI: Invalid theme specified:", themeInput) end
+        return
+    end
+
+    Cosmic.SelectedTheme = newTheme -- Update the global selected theme for new elements
+
+    -- Update existing elements
+    self:UpdateElementThemes()
+
+    if not silent then
+        self:Notify({Title = "Theme Changed", Content = "Theme set to " .. (newTheme.Name or "Custom"), Duration = 3, Icon = Cosmic.SelectedTheme.Icons.Settings})
+    end
+end
+
+function Cosmic:Notify(data)
+    -- Adapted Rayfield Notify Logic
+    local theme = Cosmic.SelectedTheme
+    local notification = Instance.new("Frame")
+    notification.Name = data.Title or "Notification"
+    notification.Size = UDim2.new(1, 0, 0, 0) -- Start height 0
+    notification.BackgroundColor3 = theme.NotificationBackground or theme.Background
+    notification.BackgroundTransparency = 1
+    notification.ClipsDescendants = true
+    notification.LayoutOrder = #self.NotificationsFrame:GetChildren() + 1
+    ApplyThemeStyle(notification, "Label") -- Base style
+    notification.Parent = self.NotificationsFrame
+
+    local padding = Instance.new("UIPadding")
+    padding.PaddingTop = UDim.new(0, 5)
+    padding.PaddingBottom = UDim.new(0, 5)
+    padding.PaddingLeft = UDim.new(0, 45) -- Space for icon
+    padding.PaddingRight = UDim.new(0, 10)
+    padding.Parent = notification
+
+    local icon = CreateIcon(data.Icon or theme.Icons.NotificationDefault, notification,
+        UDim2.fromOffset(24, 24),
+        UDim2.new(0, 10, 0.5, 0), -- Position left-center
+        theme.TextColor)
+    icon.AnchorPoint = Vector2.new(0, 0.5)
+    icon.BackgroundTransparency = 1
+    icon.ImageTransparency = 1
+    icon.ZIndex = 2
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Name = "Title"
+    titleLabel.Size = UDim2.new(1, 0, 0, theme.TextSizeTitle or 18)
+    titleLabel.Text = data.Title or "Notification"
+    titleLabel.Font = theme.FontBold or theme.Font
+    titleLabel.TextSize = theme.TextSizeTitle or 18
+    titleLabel.TextColor3 = theme.TextColor
+    titleLabel.TextTransparency = 1
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.TextYAlignment = Enum.TextYAlignment.Bottom
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.ZIndex = 1
+    titleLabel.Parent = notification
+
+    local contentLabel = Instance.new("TextLabel")
+    contentLabel.Name = "Content"
+    contentLabel.Size = UDim2.new(1, 0, 1, -(theme.TextSizeTitle or 18)) -- Fill remaining space
+    contentLabel.Position = UDim2.new(0, 0, 0, theme.TextSizeTitle or 18)
+    contentLabel.Text = data.Content or ""
+    contentLabel.Font = theme.Font
+    contentLabel.TextSize = theme.TextSize or 14
+    contentLabel.TextColor3 = theme.TextSecondary or theme.TextColor
+    contentLabel.TextTransparency = 1
+    contentLabel.TextXAlignment = Enum.TextXAlignment.Left
+    contentLabel.TextYAlignment = Enum.TextYAlignment.Top
+    contentLabel.TextWrapped = true
+    contentLabel.BackgroundTransparency = 1
+    contentLabel.ZIndex = 1
+    contentLabel.Parent = notification
+
+    -- Calculate required height
+    local titleHeight = titleLabel.TextBounds.Y
+    local contentHeight = contentLabel.TextBounds.Y
+    local requiredHeight = titleHeight + contentHeight + padding.PaddingTop.Offset + padding.PaddingBottom.Offset + 5 -- Extra padding
+    requiredHeight = math.max(requiredHeight, 50) -- Minimum height
+
+    -- Show Animation
+    PlayTween(notification, {Size = UDim2.new(1, 0, 0, requiredHeight), BackgroundTransparency = 0.1}, 0.4)
+    PlayTween(icon, {ImageTransparency = 0}, 0.5, nil, Enum.EasingDirection.In)
+    PlayTween(titleLabel, {TextTransparency = 0}, 0.5)
+    PlayTween(contentLabel, {TextTransparency = 0.2}, 0.6)
+
+    -- Auto-hide
+    local waitDuration = data.Duration or math.clamp((#(data.Content or "") * 0.08) + 2.0, 3, 8) -- Adjusted calculation
+    task.delay(waitDuration, function()
+        if notification and notification.Parent then
+            PlayTween(notification, {BackgroundTransparency = 1}, 0.3)
+            PlayTween(icon, {ImageTransparency = 1}, 0.3)
+            PlayTween(titleLabel, {TextTransparency = 1}, 0.3)
+            PlayTween(contentLabel, {TextTransparency = 1}, 0.3)
+            local sizeTween = PlayTween(notification, {Size = UDim2.new(1, 0, 0, 0)}, 0.4, nil, Enum.EasingDirection.In)
+            sizeTween.Completed:Connect(function()
+                if notification and notification.Parent then notification:Destroy() end
+            end)
+        end
+    end)
+end
+
+function Cosmic:ToggleSearch(forceClose)
+    local targetVisible = not self.SearchOpen
+    if forceClose then targetVisible = false end
+
+    if targetVisible then -- Open Search
+        self.SearchOpen = true
+        self.SearchFrame.Visible = true
+        self.SearchFrame.BackgroundTransparency = 1
+        self.SearchFrame.Position = UDim2.new(0, Cosmic.SelectedTheme.Padding or 10, 0, (self.Config.ShowTopbar and self.Config.TopbarHeight or 0) - 10) -- Start above final pos
+        self.SearchInput.TextTransparency = 1
+        self.SearchInput.PlaceholderColor3 = Color3.clear(1) -- Hide placeholder during anim
+
+        PlayTween(self.SearchFrame, {
+            BackgroundTransparency = 0,
+            Position = UDim2.new(0, Cosmic.SelectedTheme.Padding or 10, 0, (self.Config.ShowTopbar and self.Config.TopbarHeight or 0) + 5)
+        }, 0.3)
+        PlayTween(self.SearchInput, {TextTransparency = 0}, 0.4)
+        task.delay(0.1, function() if self.SearchInput then self.SearchInput.PlaceholderColor3 = Cosmic.SelectedTheme.PlaceholderColor end end) -- Restore placeholder
+
+        -- Adjust TabBar position
+        PlayTween(self.TabBar, {Position = UDim2.new(0, 0, 0, self.SearchFrame.Position.Y.Offset + self.SearchFrame.Size.Y.Offset + 5)}, 0.3)
+        -- Adjust ContentFrame position and size
+        local contentY = self.SearchFrame.Position.Y.Offset + self.SearchFrame.Size.Y.Offset + 5 + self.TabBar.Size.Y.Offset + (Cosmic.SelectedTheme.Padding or 10)
+        PlayTween(self.ContentFrame, {
+            Position = UDim2.new(0, Cosmic.SelectedTheme.Padding or 10, 0, contentY),
+            Size = UDim2.new(1, -(Cosmic.SelectedTheme.Padding or 10) * 2, 1, -(contentY + (Cosmic.SelectedTheme.Padding or 10)))
+        }, 0.3)
+
+        self.SearchInput:CaptureFocus()
+        self:_FilterTabContent() -- Initial filter (shows all)
+
+    else -- Close Search
+        self.SearchOpen = false
+        self.SearchInput:ReleaseFocus()
+
+        PlayTween(self.SearchFrame, {
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, Cosmic.SelectedTheme.Padding or 10, 0, (self.Config.ShowTopbar and self.Config.TopbarHeight or 0) - 10)
+        }, 0.3)
+        PlayTween(self.SearchInput, {TextTransparency = 1}, 0.2)
+
+        local searchTween = PlayTween(self.SearchFrame, {BackgroundTransparency = 1}, 0.3)
+        searchTween.Completed:Connect(function() if self.SearchFrame then self.SearchFrame.Visible = false end end)
+
+        -- Restore TabBar position
+        PlayTween(self.TabBar, {Position = UDim2.new(0, 0, 0, (self.Config.ShowTopbar and self.Config.TopbarHeight or 0))}, 0.3)
+        -- Restore ContentFrame position and size
+        local contentY = (self.Config.ShowTopbar and self.Config.TopbarHeight or 0) + self.TabBar.Size.Y.Offset + (Cosmic.SelectedTheme.Padding or 10)
+        PlayTween(self.ContentFrame, {
+            Position = UDim2.new(0, Cosmic.SelectedTheme.Padding or 10, 0, contentY),
+            Size = UDim2.new(1, -(Cosmic.SelectedTheme.Padding or 10) * 2, 1, -(contentY + (Cosmic.SelectedTheme.Padding or 10)))
+        }, 0.3)
+
+        self.SearchInput.Text = "" -- Clear text on close
+        self:_FilterTabContent() -- Reset filter (shows all)
+    end
+end
+
+function Cosmic:_FilterTabContent()
+    if not self.ActiveTab or not self.ActiveTab.ContentPage then return end
+
+    local searchTerm = string.lower(self.SearchInput.Text)
+    local hasSearchTerm = #searchTerm > 0
+    local contentPage = self.ActiveTab.ContentPage
+    local resultsTitle = contentPage:FindFirstChild("SearchResultsTitle")
+
+    if hasSearchTerm and not resultsTitle then
+        resultsTitle = self:_CreateLabel(self.ActiveTab, { -- Use internal label creation
+            Name = "SearchResultsTitle",
+            Text = "Results for '" .. searchTerm .. "'",
+            Size = 1.2, -- Slightly larger
+            _IsInternal = true, -- Flag to prevent saving/listing normally
+        }).Instance -- Get the instance
+        resultsTitle.LayoutOrder = -1000 -- Ensure it's at the top
+        resultsTitle.TextColor3 = Cosmic.SelectedTheme.Accent or Cosmic.SelectedTheme.Primary
+        resultsTitle.TextSize = (Cosmic.SelectedTheme.TextSize or 14) + 1
+    elseif hasSearchTerm and resultsTitle then
+        resultsTitle.Text = "Results for '" .. searchTerm .. "'"
+    elseif not hasSearchTerm and resultsTitle then
+        resultsTitle:Destroy()
+        resultsTitle = nil
+    end
+
+    for _, element in ipairs(self.ActiveTab.Elements) do
+        if element.Instance and not element.Config._IsInternal then -- Check if instance exists and not internal
+            local elementName = string.lower(element.Config.Name or "")
+            local isVisible = not hasSearchTerm or string.find(elementName, searchTerm, 1, true)
+
+            -- Handle Sections/Dividers differently (hide if search active)
+            if element.Type == "Section" or element.Type == "Divider" then
+                isVisible = not hasSearchTerm
+            end
+
+            if element.Instance.Visible ~= isVisible then
+                 -- Simple visibility toggle, add animations if desired
+                 element.Instance.Visible = isVisible
+            end
+        end
+    end
+end
+
+function Cosmic:ShowSettingsTab()
+    -- Find or create the settings tab
+    local settingsTab
+    for _, tab in ipairs(self.Tabs) do
+        if tab.Config._IsSettingsTab then
+            settingsTab = tab
+            break
+        end
+    end
+
+    if not settingsTab then
+        -- Create the settings tab if it doesn't exist
+        settingsTab = self:AddTab({
+            Name = "Settings",
+            Icon = Cosmic.SelectedTheme.Icons.Settings,
+            _IsSettingsTab = true, -- Internal flag
+            _LayoutOrder = 1000 -- Ensure it appears last
+        })
+        self:_CreateSettingsContent(settingsTab) -- Populate with settings
+    end
+
+    self:SetActiveTab(settingsTab)
+end
+
+--[[ Tab & Element Functions ]]--
+
+function Cosmic:AddTab(config)
+    config = config or {}
+    config.Name = config.Name or "Tab"
+    config.Icon = config.Icon or Cosmic.SelectedTheme.Icons.DefaultTab
+
+    local window = self
+    local tab = {
+        IsActive = false,
+        Elements = {},
+        Config = config,
+        Connections = {},
+        Window = window -- Reference back to the window
+    }
+    local tabOrder = config._LayoutOrder or (#window.Tabs + 1)
+
+    -- Tab Button
+    local tabButton = Instance.new("TextButton")
+    tabButton.Name = config.Name:gsub("[^%w]+", "") .. "TabButton"
+    -- Calculate width based on text/icon? For now, use fixed/semi-fixed
+    local baseWidth = 100
+    local textWidth = 0 -- Calculate text bounds if needed
+    tabButton.Size = UDim2.new(0, baseWidth + textWidth, 1, 0)
+    tabButton.Text = "" -- Text is handled by internal label
+    tabButton.LayoutOrder = tabOrder
+    tabButton.AutoButtonColor = false
+    ApplyThemeStyle(tabButton, "TabButton") -- Applies inactive style
+    tabButton.Parent = window.TabBar
+
+    -- Icon
+    local iconSize = tabButton.AbsoluteSize.Y * 0.6
+    local tabIcon = CreateIcon(config.Icon, tabButton,
+        UDim2.fromOffset(iconSize, iconSize),
+        UDim2.new(0, Cosmic.SelectedTheme.SmallPadding or 5, 0.5, 0),
+        Cosmic.SelectedTheme.TabTextColor)
+    tabIcon.AnchorPoint = Vector2.new(0, 0.5)
+
+    -- Text Label
+    local tabLabel = Instance.new("TextLabel")
+    tabLabel.Name = "TabLabel"
+    local labelX = (Cosmic.SelectedTheme.SmallPadding or 5) * 2 + iconSize
+    tabLabel.Size = UDim2.new(1, -labelX - (Cosmic.SelectedTheme.SmallPadding or 5), 1, 0)
+    tabLabel.Position = UDim2.new(0, labelX, 0, 0)
+    tabLabel.BackgroundTransparency = 1
+    tabLabel.Text = config.Name
+    tabLabel.Font = Cosmic.SelectedTheme.Font or Enum.Font.SourceSans
+    tabLabel.TextSize = Cosmic.SelectedTheme.TextSizeSmall or 13
+    tabLabel.TextColor3 = Cosmic.SelectedTheme.TabTextColor
+    tabLabel.TextXAlignment = Enum.TextXAlignment.Left
+    tabLabel.Parent = tabButton
+
+    -- Tab Content Page
+    local contentPage = Instance.new("ScrollingFrame")
+    contentPage.Name = config.Name:gsub("[^%w]+", "") .. "Content"
+    contentPage.Size = UDim2.new(1, 0, 1, 0)
+    contentPage.LayoutOrder = tabOrder
+    ApplyThemeStyle(contentPage, "ScrollingFrame")
+    contentPage.CanvasSize = UDim2.new(0,0,0,0) -- Auto-sized by layout
+    contentPage.Parent = window.ContentFrame
+
+    local contentLayout = Instance.new("UIListLayout")
+    contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    contentLayout.Padding = UDim.new(0, Cosmic.SelectedTheme.Padding or 10)
+    contentLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    contentLayout.Parent = contentPage
+
+    -- Auto-canvas size
+    table.insert(tab.Connections, contentLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        contentPage.CanvasSize = UDim2.new(0, 0, 0, contentLayout.AbsoluteContentSize.Y + (Cosmic.SelectedTheme.Padding or 10))
+    end))
+
+    -- Assign to tab object
+    tab.Button = tabButton
+    tab.Icon = tabIcon
+    tab.Label = tabLabel
+    tab.ContentPage = contentPage
+    tab.ContentLayout = contentLayout
+
+    -- Add element creation methods to the tab object (using internal functions)
+    function tab:CreateButton(btnConfig) return Cosmic:_CreateButton(self, btnConfig) end
+    function tab:CreateToggle(tglConfig) return Cosmic:_CreateToggle(self, tglConfig) end
+    function tab:CreateDropdown(drpConfig) return Cosmic:_CreateDropdown(self, drpConfig) end
+    function tab:CreateInput(inpConfig) return Cosmic:_CreateInput(self, inpConfig) end
+    function tab:CreateLabel(lblConfig) return Cosmic:_CreateLabel(self, lblConfig) end
+    function tab:CreateSlider(sldConfig) return Cosmic:_CreateSlider(self, sldConfig) end
+    function tab:CreateKeybind(keyConfig) return Cosmic:_CreateKeybind(self, keyConfig) end
+    function tab:CreateColorPicker(cpConfig) return Cosmic:_CreateColorPicker(self, cpConfig) end
+    function tab:CreateSection(secName) return Cosmic:_CreateSection(self, secName) end
+    function tab:CreateDivider() return Cosmic:_CreateDivider(self) end
+    function tab:CreateParagraph(pConfig) return Cosmic:_CreateParagraph(self, pConfig) end
+
+    table.insert(window.Tabs, tab)
+
+    -- Activate the first non-settings tab added
+    if not window.ActiveTab and not config._IsSettingsTab then
+        window:SetActiveTab(tab, true) -- Activate immediately
+    end
+
+    -- Click listener
+    table.insert(tab.Connections, tabButton.MouseButton1Click:Connect(function()
+        window:SetActiveTab(tab)
+    end))
+
+    -- Hover effect for inactive tabs
+    table.insert(tab.Connections, tabButton.MouseEnter:Connect(function()
+        if not tab.IsActive then PlayTween(tabButton, { BackgroundTransparency = 0.3 }, 0.1) end
+    end))
+    table.insert(tab.Connections, tabButton.MouseLeave:Connect(function()
+        if not tab.IsActive then PlayTween(tabButton, { BackgroundTransparency = (Cosmic.SelectedTheme.TabBackground and Cosmic.SelectedTheme.TabBackground.Transparency) or 0.7 }, 0.1) end -- Use theme transparency or default
+    end))
+
+    -- Connect theme updates for tab button
+    table.insert(window.ThemeConnections, function()
+        if tab.IsActive then
+            ApplyThemeStyle(tabButton, "TabButtonActive")
+            tabLabel.TextColor3 = Cosmic.SelectedTheme.SelectedTabTextColor
+            tabIcon.ImageColor3 = Cosmic.SelectedTheme.SelectedTabTextColor
+        else
+            ApplyThemeStyle(tabButton, "TabButton")
+            tabLabel.TextColor3 = Cosmic.SelectedTheme.TabTextColor
+            tabIcon.ImageColor3 = Cosmic.SelectedTheme.TabTextColor
         end
     end)
 
-    -- Element Object (for potential future use like :SetEnabled)
+    -- Connect search input changes to filter this tab when active
+    table.insert(tab.Connections, window.SearchInput:GetPropertyChangedSignal("Text"):Connect(function()
+        if window.ActiveTab == tab then window:_FilterTabContent() end
+    end))
+
+
+    return tab
+end
+
+function Cosmic:SetActiveTab(targetTab, immediate)
+    if self.ActiveTab == targetTab or self.IsMinimized then return end
+
+    local speed = immediate and 0 or nil
+    local theme = Cosmic.SelectedTheme
+
+    -- Deactivate previous tab
+    if self.ActiveTab then
+        local prevTab = self.ActiveTab
+        prevTab.IsActive = false
+        ApplyThemeStyle(prevTab.Button, "TabButton") -- Apply inactive style
+        PlayTween(prevTab.Button, { BackgroundTransparency = theme.TabBackground and theme.TabBackground.Transparency or 0.7 }, speed)
+        PlayTween(prevTab.Label, { TextColor3 = theme.TabTextColor }, speed)
+        PlayTween(prevTab.Icon, { ImageColor3 = theme.TabTextColor }, speed)
+    end
+
+    -- Activate new tab
+    targetTab.IsActive = true
+    self.ActiveTab = targetTab
+    ApplyThemeStyle(targetTab.Button, "TabButtonActive") -- Apply active style
+    PlayTween(targetTab.Button, { BackgroundTransparency = theme.TabBackgroundSelected and theme.TabBackgroundSelected.Transparency or 0 }, speed)
+    PlayTween(targetTab.Label, { TextColor3 = theme.SelectedTabTextColor }, speed)
+    PlayTween(targetTab.Icon, { ImageColor3 = theme.SelectedTabTextColor }, speed)
+
+    -- Switch page layout
+    if immediate then
+        self.PageLayout:JumpTo(targetTab.ContentPage)
+    else
+        self.PageLayout:ScrollTo(targetTab.ContentPage) -- Use ScrollTo for smoother transition
+    end
+
+    -- Re-apply search filter for the new tab
+    self:_FilterTabContent()
+end
+
+--[[ Internal Element Creation Functions (Called by Tab methods) ]]--
+
+-- Base Element Creation Helper
+function Cosmic:_CreateBaseElement(parentTab, config, elementType, template)
+    config = config or {}
+    config.Name = config.Name or elementType
+    config.Flag = config.Flag or nil -- For config saving
+    config._IsInternal = config._IsInternal or false -- For internal elements like search results title
+
+    local elementOrder = #parentTab.Elements + 1
+
+    local elementFrame = template:Clone()
+    elementFrame.Name = config.Name:gsub("[^%w]+", "") -- Sanitize name
+    elementFrame.Visible = true
+    elementFrame.LayoutOrder = elementOrder
+    ApplyThemeStyle(elementFrame, elementType) -- Apply base style
+    elementFrame.Parent = parentTab.ContentPage
+
     local element = {
-        Type = "Button",
-        Name = btnConfig.Name,
-        Instance = buttonFrame, -- Reference to the main GUI object
-        Button = button,
-        SetConfig = function(newConfig) -- Example method
-             button.Text = newConfig.Text or button.Text
-             btnConfig.Callback = newConfig.Callback or btnConfig.Callback
-             -- Update tooltip etc.
+        Type = elementType,
+        Instance = elementFrame,
+        Config = config,
+        Connections = {},
+        Window = parentTab.Window, -- Reference back to window
+        Tab = parentTab, -- Reference back to tab
+        -- Default Destroy method
+        Destroy = function(self)
+            for _, c in ipairs(self.Connections) do if typeof(c) == "RBXScriptConnection" then c:Disconnect() end end
+            self.Instance:Destroy()
+            -- Remove from parentTab.Elements
+            for i, el in ipairs(parentTab.Elements) do if el == self then table.remove(parentTab.Elements, i); break end end
+            -- Remove from global flags if necessary
+            if self.Config.Flag and Cosmic.Flags[self.Config.Flag] == self then Cosmic.Flags[self.Config.Flag] = nil end
+            for k in pairs(self) do self[k] = nil end -- Clear self
         end,
-        SetEnabled = function(enabled)
-            button.Selectable = enabled
-            button.Transparency = enabled and 0 or 0.5
-            button.TextColor3 = enabled and Starlight.Theme.Text or Starlight.Theme.TextDisabled
-            -- TODO: Disable animations/interactions
+        -- Default UpdateTheme method (can be overridden)
+        UpdateTheme = function(self)
+            ApplyThemeStyle(self.Instance, self.Type)
+            -- Add element-specific theme updates here if needed
         end
     }
-    table.insert(parentTab.Elements, element)
+
+    -- Register for configuration saving if flag exists and enabled
+    if config.Flag and parentTab.Window.CEnabled and not config._IsInternal then
+        if Cosmic.Flags[config.Flag] then
+            warn("CosmicUI: Duplicate Flag detected:", config.Flag, "- Overwriting previous element.")
+        end
+        Cosmic.Flags[config.Flag] = element
+    end
+
+    -- Add hover effect (optional, can be overridden)
+    if elementType ~= "Section" and elementType ~= "Divider" and elementType ~= "Label" and elementType ~= "Paragraph" then -- Exclude non-interactive
+        table.insert(element.Connections, elementFrame.MouseEnter:Connect(function()
+            if not element.IsDisabled then -- Check for disabled state if implemented
+                PlayTween(elementFrame, { BackgroundColor3 = Cosmic.SelectedTheme.ElementBackgroundHover }, 0.1)
+            end
+        end))
+        table.insert(element.Connections, elementFrame.MouseLeave:Connect(function()
+             if not element.IsDisabled then
+                PlayTween(elementFrame, { BackgroundColor3 = Cosmic.SelectedTheme.ElementBackground }, 0.1)
+             end
+        end))
+    end
+
+    -- Add to parent tab's element list unless internal
+    if not config._IsInternal then
+        table.insert(parentTab.Elements, element)
+    end
+
+    -- Initial animation (fade/slide in - optional)
+    elementFrame.BackgroundTransparency = 1
+    if elementFrame:FindFirstChild("BaseStroke") then elementFrame.BaseStroke.Transparency = 1 end
+    if elementFrame:FindFirstChild("Title") then elementFrame.Title.TextTransparency = 1 end
+    -- Add more initial transparency settings...
+
+    task.delay(0.1 + (elementOrder * 0.02), function() -- Staggered animation
+        if elementFrame and elementFrame.Parent then
+            PlayTween(elementFrame, { BackgroundTransparency = 0 }, 0.3)
+            if elementFrame:FindFirstChild("BaseStroke") then PlayTween(elementFrame.BaseStroke, { Transparency = 0 }, 0.3) end
+            if elementFrame:FindFirstChild("Title") then PlayTween(elementFrame.Title, { TextTransparency = 0 }, 0.3) end
+            -- Add more fade-in tweens...
+        end
+    end)
+
 
     return element
 end
 
--- Toggle Element
-function Starlight:_CreateToggle(parentTab, config)
-    -- config = { Name = "Feature", Text = "Enable Feature", Tooltip = "Toggles the feature", Default = false, Callback = function(value) end }
-    local tglConfig = config or {}
-    tglConfig.Name = tglConfig.Name or "Toggle"
-    tglConfig.Text = tglConfig.Text or "Toggle"
-    tglConfig.Default = tglConfig.Default or false
-    tglConfig.Callback = tglConfig.Callback or function(v) print("Toggle '"..tglConfig.Name.."' changed to:", v) end
+-- Button
+function Cosmic:_CreateButton(parentTab, config)
+    local template = parentTab.Window.ContentFrame.Template.Button -- Adjust path if needed
+    local element = Cosmic:_CreateBaseElement(parentTab, config, "Button", template)
+    local buttonFrame = element.Instance
+    local titleLabel = buttonFrame:FindFirstChild("Title")
+    local interactButton = buttonFrame:FindFirstChild("Interact")
 
-    local elementOrder = #parentTab.Elements + 1
-    local currentValue = tglConfig.Default
+    titleLabel.Text = config.Name
+    ApplyThemeStyle(buttonFrame, "Button") -- Ensure button-specific style
 
-    local toggleFrame = Instance.new("Frame")
-    toggleFrame.Name = tglConfig.Name:gsub("%s+", "") .. "ToggleFrame"
-    toggleFrame.Size = UDim2.new(1, 0, 0, Starlight.Theme.ElementHeight)
-    toggleFrame.BackgroundTransparency = 1
-    toggleFrame.LayoutOrder = elementOrder
-    toggleFrame.Parent = parentTab.ContentPage
+    -- Click Animation & Callback
+    table.insert(element.Connections, interactButton.MouseButton1Click:Connect(function()
+        -- Click feedback
+        PlayTween(buttonFrame, { BackgroundColor3 = Cosmic.SelectedTheme.Primary * 0.8 }, 0.05) -- Darker primary
+        PlayTween(buttonFrame, { BackgroundColor3 = Cosmic.SelectedTheme.ElementBackgroundHover }, 0.1):Delay(0.05) -- Back to hover
 
-    local toggleButton = Instance.new("TextButton") -- Clickable area
-    toggleButton.Name = "ToggleButton"
-    toggleButton.Size = UDim2.new(1, 0, 1, 0)
-    toggleButton.Text = ""
-    toggleButton.AutoButtonColor = false
-    toggleButton.BackgroundTransparency = 1
-    toggleButton.Parent = toggleFrame
-
-    local toggleLabel = Instance.new("TextLabel")
-    toggleLabel.Name = "Label"
-    toggleLabel.Size = UDim2.new(1, -Starlight.Theme.ElementHeight - Starlight.Theme.Padding.Offset, 1, 0) -- Leave space for the switch
-    toggleLabel.Position = UDim2.new(0, 0, 0, 0)
-    toggleLabel.BackgroundTransparency = 1
-    toggleLabel.Text = tglConfig.Text
-    toggleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    toggleLabel.Parent = toggleButton
-    ApplyThemeStyle(toggleLabel, "Label")
-
-    -- Visual Switch
-    local switchSize = Starlight.Theme.ElementHeight * 0.6
-    local switchTrack = Instance.new("Frame")
-    switchTrack.Name = "SwitchTrack"
-    switchTrack.Size = UDim2.new(0, switchSize * 1.8, 0, switchSize * 0.8)
-    switchTrack.Position = UDim2.new(1, -switchSize * 1.8 - Starlight.Theme.SmallPadding.Offset, 0.5, -switchSize * 0.4)
-    switchTrack.BackgroundColor3 = Starlight.Theme.Secondary
-    switchTrack.BorderSizePixel = 0
-    switchTrack.Parent = toggleButton
-    local trackCorner = Instance.new("UICorner")
-    trackCorner.CornerRadius = UDim.new(0.5, 0) -- Pill shape
-    trackCorner.Parent = switchTrack
-
-    local switchThumb = Instance.new("Frame")
-    switchThumb.Name = "SwitchThumb"
-    switchThumb.Size = UDim2.new(0, switchSize, 0, switchSize)
-    switchThumb.Position = UDim2.new(0, 0, 0.5, -switchSize / 2) -- Start left
-    switchThumb.BackgroundColor3 = Starlight.Theme.TextSecondary -- Off color
-    switchThumb.BorderSizePixel = 0
-    switchThumb.Parent = switchTrack
-    local thumbCorner = Instance.new("UICorner")
-    thumbCorner.CornerRadius = UDim.new(0.5, 0) -- Circle
-    thumbCorner.Parent = switchThumb
-
-    -- Element Object
-    local element = {
-        Type = "Toggle",
-        Name = tglConfig.Name,
-        Instance = toggleFrame,
-        Button = toggleButton,
-        Label = toggleLabel,
-        Value = currentValue,
-        SetConfig = function(newConfig) end, -- TODO
-        SetEnabled = function(enabled) end, -- TODO
-        SetValue = nil -- Defined below
-    }
-
-    -- Update Visual Function
-    local function UpdateVisuals(value, animate)
-        local targetColor = value and Starlight.Theme.Accent or Starlight.Theme.Secondary
-        local targetThumbColor = value and Starlight.Theme.Primary or Starlight.Theme.TextSecondary
-        local targetThumbPos = value and UDim2.new(1, -switchSize, 0.5, -switchSize / 2) or UDim2.new(0, 0, 0.5, -switchSize / 2)
-
-        if animate then
-            PlayTween(switchTrack, { BackgroundColor3 = targetColor }, 0.15)
-            PlayTween(switchThumb, { BackgroundColor3 = targetThumbColor, Position = targetThumbPos }, 0.15)
+        -- Callback
+        local success, err = pcall(config.Callback or function() print("Button clicked:", config.Name) end)
+        if not success then
+            warn("CosmicUI: Button Callback Error for '" .. config.Name .. "':", err)
+            parentTab.Window:Notify({Title = "Callback Error", Content = config.Name .. ": " .. tostring(err), Icon = Cosmic.SelectedTheme.Error})
+            -- Visual error indication (optional)
+            local originalColor = buttonFrame.BackgroundColor3
+            buttonFrame.BackgroundColor3 = Cosmic.SelectedTheme.Error
+            task.delay(0.5, function() if buttonFrame and buttonFrame.Parent then buttonFrame.BackgroundColor3 = originalColor end end)
         else
-            switchTrack.BackgroundColor3 = targetColor
-            switchThumb.BackgroundColor3 = targetThumbColor
-            switchThumb.Position = targetThumbPos
+            if element.Config.Flag and element.Window.CEnabled then element.Window:SaveConfiguration() end -- Save on success if flagged
+        end
+    end))
+
+    -- Override UpdateTheme if needed
+    element.UpdateTheme = function(self)
+        ApplyThemeStyle(self.Instance, "Button")
+        self.Instance.Title.TextColor3 = Cosmic.SelectedTheme.SelectedTabTextColor or Cosmic.SelectedTheme.TextColor
+    end
+    element:UpdateTheme() -- Initial call
+
+    return element
+end
+
+-- Toggle
+function Cosmic:_CreateToggle(parentTab, config)
+    config.CurrentValue = config.CurrentValue or false
+    local template = parentTab.Window.ContentFrame.Template.Toggle
+    local element = Cosmic:_CreateBaseElement(parentTab, config, "Toggle", template)
+    local toggleFrame = element.Instance
+    local titleLabel = toggleFrame:FindFirstChild("Title")
+    local switchFrame = toggleFrame:FindFirstChild("Switch")
+    local indicator = switchFrame:FindFirstChild("Indicator")
+    local interactButton = toggleFrame:FindFirstChild("Interact")
+
+    titleLabel.Text = config.Name
+    element.CurrentValue = config.CurrentValue -- Store state
+
+    local function UpdateVisuals(value, animate)
+        local theme = Cosmic.SelectedTheme
+        local speed = animate and 0.2 or 0
+        local targetPos, indicatorColor, indicatorStroke, outerStroke
+        if value then
+            targetPos = UDim2.new(1, -indicator.AbsoluteSize.X - 3, 0.5, 0) -- Right side
+            indicatorColor = theme.ToggleEnabled
+            indicatorStroke = theme.ToggleEnabledStroke
+            outerStroke = theme.ToggleEnabledOuterStroke
+        else
+            targetPos = UDim2.new(0, 3, 0.5, 0) -- Left side
+            indicatorColor = theme.ToggleDisabled
+            indicatorStroke = theme.ToggleDisabledStroke
+            outerStroke = theme.ToggleDisabledOuterStroke
+        end
+
+        PlayTween(indicator, { Position = targetPos, BackgroundColor3 = indicatorColor }, speed, Enum.EasingStyle.Quart)
+        if indicator:FindFirstChild("BaseStroke") then PlayTween(indicator.BaseStroke, { Color = indicatorStroke }, speed) end
+        if switchFrame:FindFirstChild("BaseStroke") then PlayTween(switchFrame.BaseStroke, { Color = outerStroke }, speed) end
+    end
+
+    -- Initial state
+    ApplyThemeStyle(switchFrame, "ToggleFrame")
+    ApplyThemeStyle(indicator, "ToggleIndicator")
+    UpdateVisuals(element.CurrentValue, false)
+
+    -- Click Interaction
+    table.insert(element.Connections, interactButton.MouseButton1Click:Connect(function()
+        element.CurrentValue = not element.CurrentValue
+        UpdateVisuals(element.CurrentValue, true)
+
+        -- Callback
+        local success, err = pcall(config.Callback or function(v) print("Toggle:", config.Name, v) end, element.CurrentValue)
+        if not success then
+            warn("CosmicUI: Toggle Callback Error for '" .. config.Name .. "':", err)
+            parentTab.Window:Notify({Title = "Callback Error", Content = config.Name .. ": " .. tostring(err), Icon = Cosmic.SelectedTheme.Error})
+            -- Revert state visually on error?
+            element.CurrentValue = not element.CurrentValue
+            UpdateVisuals(element.CurrentValue, true)
+        else
+             if element.Config.Flag and element.Window.CEnabled then element.Window:SaveConfiguration() end -- Save on success
+        end
+    end))
+
+    -- Set Method
+    element.Set = function(self, value, silent)
+        value = value == true
+        if self.CurrentValue == value then return end -- No change
+
+        self.CurrentValue = value
+        UpdateVisuals(self.CurrentValue, true)
+
+        if not silent then
+            local success, err = pcall(config.Callback or function() end, self.CurrentValue)
+            if not success then warn("CosmicUI: Toggle Callback Error (Set) for '" .. config.Name .. "':", err) end
+            if self.Config.Flag and self.Window.CEnabled then self.Window:SaveConfiguration() end
         end
     end
 
-    -- Set Value Method
-    function element:SetValue(value, suppressCallback)
-        value = not not value -- Ensure boolean
-        if element.Value == value then return end -- No change
+    -- Update Theme Method
+    element.UpdateTheme = function(self)
+        ApplyThemeStyle(self.Instance, "Toggle") -- Base frame
+        ApplyThemeStyle(self.Instance.Switch, "ToggleFrame")
+        ApplyThemeStyle(self.Instance.Switch.Indicator, "ToggleIndicator")
+        UpdateVisuals(self.CurrentValue, false) -- Re-apply colors based on state
+    end
+    element:UpdateTheme() -- Initial call
 
-        element.Value = value
-        UpdateVisuals(value, true)
+    return element
+end
 
-        if not suppressCallback then
-            local success, err = pcall(tglConfig.Callback, value)
-            if not success then
-                warn("Starlight: Error in toggle callback for '"..tglConfig.Name.."':", err)
-            end
-        end
+-- Slider
+function Cosmic:_CreateSlider(parentTab, config)
+    config.Range = config.Range or {0, 100}
+    config.Increment = config.Increment or 1
+    config.CurrentValue = config.CurrentValue or config.Range[1]
+    config.Suffix = config.Suffix or ""
+    local template = parentTab.Window.ContentFrame.Template.Slider
+    local element = Cosmic:_CreateBaseElement(parentTab, config, "Slider", template)
+    local sliderFrame = element.Instance
+    local titleLabel = sliderFrame:FindFirstChild("Title")
+    local sliderMain = sliderFrame:FindFirstChild("Main")
+    local progress = sliderMain:FindFirstChild("Progress")
+    local infoLabel = sliderMain:FindFirstChild("Information")
+    local interact = sliderMain:FindFirstChild("Interact")
+
+    titleLabel.Text = config.Name
+    element.CurrentValue = config.CurrentValue
+
+    local function ValueToFraction(value)
+        local min, max = config.Range[1], config.Range[2]
+        return math.clamp((value - min) / (max - min), 0, 1)
     end
 
-    -- Interaction
-    toggleButton.MouseButton1Click:Connect(function()
-        element:SetValue(not element.Value)
-    end)
+    local function FractionToValue(fraction)
+        local min, max = config.Range[1], config.Range[2]
+        local rawValue = min + fraction * (max - min)
+        local steppedValue = math.floor(rawValue / config.Increment + 0.5) * config.Increment
+        return math.clamp(steppedValue, min, max)
+    end
+
+    local function UpdateVisuals(value, animate)
+        local fraction = ValueToFraction(value)
+        local speed = animate and 0.1 or 0
+        PlayTween(progress, { Size = UDim2.new(fraction, 0, 1, 0) }, speed)
+        infoLabel.Text = tostring(value) .. (config.Suffix and (" " .. config.Suffix) or "")
+    end
 
     -- Initial State
-    UpdateVisuals(currentValue, false)
+    ApplyThemeStyle(sliderMain, "SliderTrack")
+    ApplyThemeStyle(progress, "SliderFill")
+    UpdateVisuals(element.CurrentValue, false)
 
-    table.insert(parentTab.Elements, element)
-    return element
-end
-
--- Dropdown Element
-function Starlight:_CreateDropdown(parentTab, config)
-    -- config = { Name = "Select", Text = "Select Option", Tooltip = "Choose an item", Values = {"One", "Two", "Three"}, Default = 1, AllowNull = false, Callback = function(value, index) end }
-    local drpConfig = config or {}
-    drpConfig.Name = drpConfig.Name or "Dropdown"
-    drpConfig.Text = drpConfig.Text or "Select Option"
-    drpConfig.Values = drpConfig.Values or {}
-    drpConfig.Default = drpConfig.Default or (drpConfig.AllowNull and 0 or 1)
-    drpConfig.Callback = drpConfig.Callback or function(v, i) print("Dropdown '"..drpConfig.Name.."' changed to:", v, "(Index: "..tostring(i)..")") end
-
-    local elementOrder = #parentTab.Elements + 1
-    local currentIndex = drpConfig.Default
-    local currentValue = drpConfig.Values[currentIndex]
-    local isOpen = false
-
-    local dropdownFrame = Instance.new("Frame")
-    dropdownFrame.Name = drpConfig.Name:gsub("%s+", "") .. "DropdownFrame"
-    dropdownFrame.Size = UDim2.new(1, 0, 0, Starlight.Theme.ElementHeight)
-    dropdownFrame.BackgroundTransparency = 1
-    dropdownFrame.LayoutOrder = elementOrder
-    dropdownFrame.Parent = parentTab.ContentPage
-    dropdownFrame.ClipsDescendants = false -- Allow dropdown list to overflow
-    dropdownFrame.ZIndex = 2 -- Ensure dropdown list appears above subsequent elements
-
-    local dropdownButton = Instance.new("TextButton")
-    dropdownButton.Name = "DropdownButton"
-    dropdownButton.Size = UDim2.new(1, 0, 1, 0)
-    dropdownButton.Text = ""
-    dropdownButton.AutoButtonColor = false
-    dropdownButton.Parent = dropdownFrame
-    ApplyThemeStyle(dropdownButton, "Button") -- Use button style as base
-    dropdownButton.BackgroundColor3 = Starlight.Theme.Secondary -- Override to secondary
-
-    local dropdownLabel = Instance.new("TextLabel")
-    dropdownLabel.Name = "Label"
-    dropdownLabel.Size = UDim2.new(1, -Starlight.Theme.ElementHeight, 1, 0) -- Space for arrow
-    dropdownLabel.Position = UDim2.new(0, Starlight.Theme.SmallPadding.Offset, 0, 0)
-    dropdownLabel.BackgroundTransparency = 1
-    dropdownLabel.Text = drpConfig.Text .. ": " .. (currentValue or "None")
-    dropdownLabel.TextXAlignment = Enum.TextXAlignment.Left
-    dropdownLabel.Parent = dropdownButton
-    ApplyThemeStyle(dropdownLabel, "Label")
-
-    local arrowIcon = CreateIcon(Starlight.Theme.Icons.DropdownArrow, dropdownButton,
-        UDim2.new(0, 16, 0, 16),
-        UDim2.new(1, -Starlight.Theme.ElementHeight*0.8, 0.5, -8),
-        Starlight.Theme.TextSecondary)
-    arrowIcon.ImageRotation = 0
-
-    -- Dropdown List Frame
-    local listFrame = Instance.new("ScrollingFrame")
-    listFrame.Name = "ListFrame"
-    listFrame.Size = UDim2.new(1, 0, 0, 0) -- Height calculated later
-    listFrame.Position = UDim2.new(0, 0, 1, Starlight.Theme.SmallPadding.Offset) -- Position below button
-    listFrame.BackgroundColor3 = Starlight.Theme.Secondary
-    listFrame.BorderSizePixel = 0
-    listFrame.Visible = false
-    listFrame.ClipsDescendants = true
-    listFrame.ScrollBarThickness = 4
-    listFrame.ScrollBarImageColor3 = Starlight.Theme.Accent
-    listFrame.CanvasSize = UDim2.new(0,0,0,0)
-    listFrame.Parent = dropdownFrame -- Parent to main frame for ZIndex
-    ApplyThemeStyle(listFrame, "ListFrame")
-
-    local listLayout = Instance.new("UIListLayout")
-    listLayout.Padding = UDim.new(0, 2)
-    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    listLayout.Parent = listFrame
-
-    -- Element Object
-    local element = {
-        Type = "Dropdown",
-        Name = drpConfig.Name,
-        Instance = dropdownFrame,
-        Button = dropdownButton,
-        Label = dropdownLabel,
-        ListFrame = listFrame,
-        Values = drpConfig.Values,
-        CurrentIndex = currentIndex,
-        CurrentValue = currentValue,
-        IsOpen = isOpen,
-        SetConfig = function(newConfig) end, -- TODO
-        SetEnabled = function(enabled) end, -- TODO
-        SetValue = nil, -- Defined below
-        UpdateValues = nil -- Defined below
-    }
-
-    -- Populate List Function
-    local function PopulateList()
-        -- Clear existing
-        for _, child in ipairs(listFrame:GetChildren()) do
-            if child:IsA("TextButton") then child:Destroy() end
-        end
-
-        local totalHeight = 0
-        local optionHeight = Starlight.Theme.ElementHeight * 0.8
-
-        -- Add 'None' option if allowed
-        if drpConfig.AllowNull then
-            local optionButton = Instance.new("TextButton")
-            optionButton.Name = "Option_None"
-            optionButton.Size = UDim2.new(1, 0, 0, optionHeight)
-            optionButton.Text = "  None"
-            optionButton.LayoutOrder = 0
-            optionButton.AutoButtonColor = false
-            optionButton.BackgroundTransparency = 1
-            optionButton.TextXAlignment = Enum.TextXAlignment.Left
-            optionButton.Parent = listFrame
-            ApplyThemeStyle(optionButton, "DropdownOption")
-            optionButton.TextColor3 = (element.CurrentIndex == 0) and Starlight.Theme.Accent or Starlight.Theme.Text
-
-            optionButton.MouseEnter:Connect(function() if element.CurrentIndex ~= 0 then optionButton.BackgroundColor3 = Starlight.Theme.Hover end end)
-            optionButton.MouseLeave:Connect(function() optionButton.BackgroundColor3 = Color3.new(0,0,0); optionButton.BackgroundTransparency = 1 end)
-            optionButton.MouseButton1Click:Connect(function()
-                element:SetValue(nil, 0)
-            end)
-            totalHeight = totalHeight + optionHeight + listLayout.Padding.Offset
-        end
-
-        -- Add value options
-        for i, v in ipairs(element.Values) do
-            local optionButton = Instance.new("TextButton")
-            optionButton.Name = "Option_" .. i
-            optionButton.Size = UDim2.new(1, 0, 0, optionHeight)
-            optionButton.Text = "  " .. tostring(v)
-            optionButton.LayoutOrder = i
-            optionButton.AutoButtonColor = false
-            optionButton.BackgroundTransparency = 1
-            optionButton.TextXAlignment = Enum.TextXAlignment.Left
-            optionButton.Parent = listFrame
-            ApplyThemeStyle(optionButton, "DropdownOption")
-            optionButton.TextColor3 = (element.CurrentIndex == i) and Starlight.Theme.Accent or Starlight.Theme.Text
-
-            optionButton.MouseEnter:Connect(function() if element.CurrentIndex ~= i then optionButton.BackgroundColor3 = Starlight.Theme.Hover end end)
-            optionButton.MouseLeave:Connect(function() optionButton.BackgroundColor3 = Color3.new(0,0,0); optionButton.BackgroundTransparency = 1 end)
-            optionButton.MouseButton1Click:Connect(function()
-                element:SetValue(v, i)
-            end)
-            totalHeight = totalHeight + optionHeight + listLayout.Padding.Offset
-        end
-
-        -- Adjust list frame height (limited)
-        local maxHeight = Starlight.Theme.ElementHeight * 5.5 -- Max height for ~5 items
-        local targetHeight = math.min(totalHeight, maxHeight)
-        listFrame.CanvasSize = UDim2.new(0, 0, 0, totalHeight)
-        listFrame.Size = UDim2.new(1, 0, 0, targetHeight)
-    end
-
-    -- Open/Close List Function
-    local function SetOpen(open)
-        if element.IsOpen == open then return end
-        element.IsOpen = open
-        dropdownFrame.ClipsDescendants = not open -- Allow overflow when open
-        dropdownFrame.ZIndex = open and 10 or 2 -- Bring to front when open
-
-        if open then
-            PopulateList() -- Repopulate in case values changed
-            listFrame.Visible = true
-            PlayTween(arrowIcon, { ImageRotation = 180 }, 0.15)
-            PlayTween(listFrame, { Size = UDim2.new(1, 0, 0, listFrame.Size.Y.Offset) }, 0.15) -- Animate height (already calculated in PopulateList)
-        else
-            PlayTween(arrowIcon, { ImageRotation = 0 }, 0.15)
-            local closeTween = PlayTween(listFrame, { Size = UDim2.new(1, 0, 0, 0) }, 0.15) -- Animate height closed
-            closeTween.Completed:Connect(function()
-                if not element.IsOpen then listFrame.Visible = false end -- Hide only after animation if still closed
-            end)
-        end
-    end
-
-    -- Set Value Method
-    function element:SetValue(value, index, suppressCallback)
-        index = index or 0 -- Default to 0 if only value is passed (e.g., for null)
-        if element.CurrentIndex == index then
-            SetOpen(false) -- Close if clicking the same value
-            return
-        end
-
-        element.CurrentValue = value
-        element.CurrentIndex = index
-        element.Label.Text = drpConfig.Text .. ": " .. (value or "None")
-        SetOpen(false) -- Close the dropdown
-
-        if not suppressCallback then
-            local success, err = pcall(drpConfig.Callback, value, index)
-            if not success then
-                warn("Starlight: Error in dropdown callback for '"..drpConfig.Name.."':", err)
-            end
-        end
-    end
-
-    -- Update Values Method
-    function element:UpdateValues(newValues, newDefaultIndex)
-        element.Values = newValues or {}
-        local defaultIdx = newDefaultIndex or (drpConfig.AllowNull and 0 or 1)
-        local defaultValue = element.Values[defaultIdx]
-        element:SetValue(defaultValue, defaultIdx, true) -- Set new default value without triggering callback
-        if element.IsOpen then PopulateList() end -- Refresh list if open
-    end
-
-    -- Interaction
-    dropdownButton.MouseButton1Click:Connect(function()
-        SetOpen(not element.IsOpen)
-    end)
-
-    -- Close when clicking elsewhere (basic implementation)
-    UserInputService.InputBegan:Connect(function(input)
-        if not element.IsOpen then return end
+    -- Drag Interaction
+    local dragging = false
+    table.insert(element.Connections, interact.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            local guiObject = input.UserInputState == Enum.UserInputState.Begin and input.GuiObject or nil
-            if not guiObject or not (guiObject == dropdownFrame or guiObject:IsDescendantOf(dropdownFrame)) then
-                SetOpen(false)
-            end
+            dragging = true
+            PlayTween(sliderMain.BaseStroke, { Transparency = 1 }, 0.1) -- Hide outer stroke
+            PlayTween(progress.BaseStroke, { Transparency = 1 }, 0.1) -- Hide inner stroke
+            -- Apply glow/highlight?
         end
-    end)
-
-    -- Initial State
-    element:SetValue(currentValue, currentIndex, true) -- Set initial value without callback
-
-    table.insert(parentTab.Elements, element)
-    return element
-end
-
--- Input Element
-function Starlight:_CreateInput(parentTab, config)
-    -- config = { Name = "Setting", Text = "Enter Value:", Tooltip = "Input field", Placeholder = "Value...", Default = "", Numeric = false, Secret = false, Finished = false, Callback = function(text) end }
-    local inpConfig = config or {}
-    inpConfig.Name = inpConfig.Name or "Input"
-    inpConfig.Text = inpConfig.Text or "Input:"
-    inpConfig.Placeholder = inpConfig.Placeholder or "..."
-    inpConfig.Default = inpConfig.Default or ""
-    inpConfig.Callback = inpConfig.Callback or function(t) print("Input '"..inpConfig.Name.."' changed to:", t) end
-
-    local elementOrder = #parentTab.Elements + 1
-    local currentValue = inpConfig.Default
-
-    local inputFrame = Instance.new("Frame")
-    inputFrame.Name = inpConfig.Name:gsub("%s+", "") .. "InputFrame"
-    inputFrame.Size = UDim2.new(1, 0, 0, Starlight.Theme.ElementHeight)
-    inputFrame.BackgroundTransparency = 1
-    inputFrame.LayoutOrder = elementOrder
-    inputFrame.Parent = parentTab.ContentPage
-
-    local inputLabel = Instance.new("TextLabel")
-    inputLabel.Name = "Label"
-    inputLabel.Size = UDim2.new(0.4, 0, 1, 0) -- Label takes ~40% width
-    inputLabel.Position = UDim2.new(0, 0, 0, 0)
-    inputLabel.BackgroundTransparency = 1
-    inputLabel.Text = inpConfig.Text
-    inputLabel.TextXAlignment = Enum.TextXAlignment.Left
-    inputLabel.Parent = inputFrame
-    ApplyThemeStyle(inputLabel, "Label")
-
-    local textBox = Instance.new("TextBox")
-    textBox.Name = "TextBox"
-    textBox.Size = UDim2.new(0.6, -Starlight.Theme.SmallPadding.Offset, 1, 0) -- TextBox takes remaining width
-    textBox.Position = UDim2.new(0.4, Starlight.Theme.SmallPadding.Offset, 0, 0)
-    textBox.Text = currentValue
-    textBox.PlaceholderText = inpConfig.Placeholder
-    textBox.ClearTextOnFocus = false
-    textBox.TextXAlignment = Enum.TextXAlignment.Left
-    textBox.Parent = inputFrame
-    ApplyThemeStyle(textBox, "Input")
-    textBox.BackgroundColor3 = Starlight.Theme.Secondary
-    textBox.PlaceholderColor3 = Starlight.Theme.TextDisabled
-
-    if inpConfig.Numeric then
-        textBox.Text = tostring(tonumber(currentValue) or 0)
-        textBox:GetPropertyChangedSignal("Text"):Connect(function()
-            local num = tonumber(textBox.Text)
-            if num == nil and textBox.Text ~= "" and textBox.Text ~= "-" then
-                -- Revert to last valid number (or 0)
-                textBox.Text = tostring(tonumber(currentValue) or 0)
-            end
-        end)
-    end
-
-    if inpConfig.Secret then
-        textBox.TextMasked = true
-    end
-
-    -- Element Object
-    local element = {
-        Type = "Input",
-        Name = inpConfig.Name,
-        Instance = inputFrame,
-        Label = inputLabel,
-        TextBox = textBox,
-        Value = currentValue,
-        SetConfig = function(newConfig) end, -- TODO
-        SetEnabled = function(enabled) end, -- TODO
-        SetValue = nil -- Defined below
-    }
-
-    -- Set Value Method
-    function element:SetValue(value, suppressCallback)
-        value = tostring(value)
-        if inpConfig.Numeric then
-            value = tostring(tonumber(value) or 0)
-        end
-        if element.Value == value then return end
-
-        element.Value = value
-        textBox.Text = value
-
-        if not suppressCallback then
-            local success, err = pcall(inpConfig.Callback, value)
-            if not success then
-                warn("Starlight: Error in input callback for '"..inpConfig.Name.."':", err)
-            end
-        end
-    end
-
-    -- Interaction and Callback Trigger
-    textBox.FocusLost:Connect(function(enterPressed)
-        local newValue = textBox.Text
-        if inpConfig.Numeric then
-            newValue = tostring(tonumber(newValue) or 0)
-            textBox.Text = newValue -- Ensure displayed text is cleaned number
-        end
-
-        if element.Value ~= newValue then
-            element:SetValue(newValue) -- This calls the callback internally
-        end
-    end)
-
-    -- Highlight on focus
-    textBox.Focused:Connect(function()
-        PlayTween(textBox.UIStroke, { Color = Starlight.Theme.StrokeHighlight, Thickness = 1.5 }, 0.1)
-    end)
-    textBox.FocusLost:Connect(function()
-        PlayTween(textBox.UIStroke, { Color = Starlight.Theme.Stroke, Thickness = 1 }, 0.1)
-    end)
-
-    table.insert(parentTab.Elements, element)
-    return element
-end
-
--- Label / Paragraph Element
-function Starlight:_CreateLabel(parentTab, config)
-    -- config = { Name = "Info", Text = "Some information", Size = 1, Center = false, Bold = false }
-    local lblConfig = config or {}
-    lblConfig.Name = lblConfig.Name or "Label"
-    lblConfig.Text = lblConfig.Text or "Label"
-    lblConfig.Size = lblConfig.Size or 1 -- Multiplier for standard height
-
-    local elementOrder = #parentTab.Elements + 1
-
-    local labelFrame = Instance.new("Frame")
-    labelFrame.Name = lblConfig.Name:gsub("%s+", "") .. "LabelFrame"
-    labelFrame.Size = UDim2.new(1, 0, 0, Starlight.Theme.ElementHeight * lblConfig.Size)
-    labelFrame.BackgroundTransparency = 1
-    labelFrame.LayoutOrder = elementOrder
-    labelFrame.Parent = parentTab.ContentPage
-
-    local label = Instance.new("TextLabel")
-    label.Name = "Label"
-    label.Size = UDim2.new(1, -Starlight.Theme.Padding.Offset * 2, 1, 0) -- Padding
-    label.Position = UDim2.new(0, Starlight.Theme.Padding.Offset, 0, 0)
-    label.BackgroundTransparency = 1
-    label.Text = lblConfig.Text
-    label.TextWrapped = true
-    label.TextXAlignment = lblConfig.Center and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left
-    label.TextYAlignment = Enum.TextYAlignment.Top -- Usually better for multi-line
-    label.Font = lblConfig.Bold and Starlight.Theme.FontBold or Starlight.Theme.Font
-    label.TextColor3 = Starlight.Theme.TextSecondary -- Use secondary color for info
-    label.Parent = labelFrame
-    -- ApplyThemeStyle(label, "Label") -- Basic style applied, specific overrides here
-
-    -- Element Object
-    local element = {
-        Type = "Label",
-        Name = lblConfig.Name,
-        Instance = labelFrame,
-        Label = label,
-        SetText = function(newText)
-            label.Text = newText
-            lblConfig.Text = newText
-        end
-    }
-    table.insert(parentTab.Elements, element)
-    return element
-end
-
--- Section Element
-function Starlight:_CreateSection(parentTab, title)
-    title = title or "Section"
-    local elementOrder = #parentTab.Elements + 1
-
-    local sectionFrame = Instance.new("Frame")
-    sectionFrame.Name = title:gsub("%s+", "") .. "SectionFrame"
-    sectionFrame.Size = UDim2.new(1, 0, 0, Starlight.Theme.TextSizeTitle + Starlight.Theme.SmallPadding.Offset * 2) -- Height based on title size
-    sectionFrame.BackgroundTransparency = 1
-    sectionFrame.LayoutOrder = elementOrder
-    sectionFrame.Parent = parentTab.ContentPage
-
-    local sectionLabel = Instance.new("TextLabel")
-    sectionLabel.Name = "Label"
-    sectionLabel.Size = UDim2.new(1, -Starlight.Theme.Padding.Offset * 2, 1, 0)
-    sectionLabel.Position = UDim2.new(0, Starlight.Theme.Padding.Offset, 0, 0)
-    sectionLabel.BackgroundTransparency = 1
-    sectionLabel.Text = title
-    sectionLabel.Font = Starlight.Theme.FontTitle
-    sectionLabel.TextSize = Starlight.Theme.TextSizeTitle
-    sectionLabel.TextColor3 = Starlight.Theme.Text -- Use primary text color for titles
-    sectionLabel.TextXAlignment = Enum.TextXAlignment.Left
-    sectionLabel.Parent = sectionFrame
-
-    local line = Instance.new("Frame") -- Separator line
-    line.Name = "Separator"
-    line.Size = UDim2.new(1, -Starlight.Theme.Padding.Offset * 2, 0, 1)
-    line.Position = UDim2.new(0, Starlight.Theme.Padding.Offset, 1, -Starlight.Theme.SmallPadding.Offset)
-    line.BackgroundColor3 = Starlight.Theme.Stroke
-    line.BorderSizePixel = 0
-    line.Parent = sectionFrame
-
-    -- Element Object (mainly for structure, no interaction)
-    local element = {
-        Type = "Section",
-        Name = title,
-        Instance = sectionFrame
-    }
-    table.insert(parentTab.Elements, element)
-    return element
-end
-
--- Slider Element
-function Starlight:_CreateSlider(parentTab, config)
-    -- config = { Name="Value", Text="Adjust Value", Tooltip="", Min=0, Max=100, Default=50, Increment=1, Suffix="%", Callback=function(value) end }
-    local sldConfig = config or {}
-    sldConfig.Name = sldConfig.Name or "Slider"
-    sldConfig.Text = sldConfig.Text or "Slider"
-    sldConfig.Min = sldConfig.Min or 0
-    sldConfig.Max = sldConfig.Max or 100
-    sldConfig.Default = sldConfig.Default or sldConfig.Min
-    sldConfig.Increment = sldConfig.Increment or 1
-    sldConfig.Suffix = sldConfig.Suffix or ""
-    sldConfig.Callback = sldConfig.Callback or function(v) print("Slider '"..sldConfig.Name.."' changed to:", v) end
-
-    local elementOrder = #parentTab.Elements + 1
-    local currentValue = math.clamp(sldConfig.Default, sldConfig.Min, sldConfig.Max)
-    local isDragging = false
-
-    local sliderFrame = Instance.new("Frame")
-    sliderFrame.Name = sldConfig.Name:gsub("%s+", "") .. "SliderFrame"
-    sliderFrame.Size = UDim2.new(1, 0, 0, Starlight.Theme.ElementHeight * 1.5) -- Slightly taller for label
-    sliderFrame.BackgroundTransparency = 1
-    sliderFrame.LayoutOrder = elementOrder
-    sliderFrame.Parent = parentTab.ContentPage
-
-    local sliderLabel = Instance.new("TextLabel")
-    sliderLabel.Name = "Label"
-    sliderLabel.Size = UDim2.new(0.7, 0, 0, Starlight.Theme.ElementHeight * 0.5) -- Top part for label
-    sliderLabel.Position = UDim2.new(0, 0, 0, 0)
-    sliderLabel.BackgroundTransparency = 1
-    sliderLabel.Text = sldConfig.Text
-    sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
-    sliderLabel.Parent = sliderFrame
-    ApplyThemeStyle(sliderLabel, "Label")
-    sliderLabel.TextColor3 = Starlight.Theme.TextSecondary
-
-    local valueLabel = Instance.new("TextLabel")
-    valueLabel.Name = "ValueLabel"
-    valueLabel.Size = UDim2.new(0.3, -Starlight.Theme.SmallPadding.Offset, 0, Starlight.Theme.ElementHeight * 0.5)
-    valueLabel.Position = UDim2.new(0.7, Starlight.Theme.SmallPadding.Offset, 0, 0)
-    valueLabel.BackgroundTransparency = 1
-    valueLabel.Text = ""
-    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
-    valueLabel.Parent = sliderFrame
-    ApplyThemeStyle(valueLabel, "ValueLabel")
-    valueLabel.TextColor3 = Starlight.Theme.Accent
-    valueLabel.Font = Starlight.Theme.FontBold
-
-    -- Slider Track
-    local trackYPos = Starlight.Theme.ElementHeight * 0.75
-    local trackHeight = 6
-    local track = Instance.new("Frame")
-    track.Name = "Track"
-    track.Size = UDim2.new(1, -Starlight.Theme.Padding.Offset * 2, 0, trackHeight)
-    track.Position = UDim2.new(0, Starlight.Theme.Padding.Offset, 0, trackYPos - trackHeight / 2)
-    track.BackgroundColor3 = Starlight.Theme.Secondary
-    track.BorderSizePixel = 0
-    track.Parent = sliderFrame
-    local trackCorner = Instance.new("UICorner")
-    trackCorner.CornerRadius = UDim.new(0.5, 0)
-    trackCorner.Parent = track
-
-    -- Filled Track
-    local filledTrack = Instance.new("Frame")
-    filledTrack.Name = "FilledTrack"
-    filledTrack.Size = UDim2.new(0, 0, 1, 0) -- Width calculated based on value
-    filledTrack.Position = UDim2.new(0, 0, 0, 0)
-    filledTrack.BackgroundColor3 = Starlight.Theme.Primary
-    filledTrack.BorderSizePixel = 0
-    filledTrack.Parent = track
-    local filledCorner = Instance.new("UICorner")
-    filledCorner.CornerRadius = UDim.new(0.5, 0)
-    filledCorner.Parent = filledTrack
-
-    -- Thumb
-    local thumbSize = Starlight.Theme.ElementHeight * 0.5
-    local thumb = Instance.new("ImageButton") -- Use ImageButton for potential custom thumb later
-    thumb.Name = "Thumb"
-    thumb.Size = UDim2.new(0, thumbSize, 0, thumbSize)
-    thumb.Position = UDim2.new(0, 0, 0, trackYPos - thumbSize / 2) -- Y centered on track
-    thumb.BackgroundColor3 = Starlight.Theme.Accent
-    thumb.BorderSizePixel = 0
-    thumb.AutoButtonColor = false
-    thumb.BackgroundTransparency = 0 -- Visible thumb
-    thumb.Parent = sliderFrame
-    local thumbCorner = Instance.new("UICorner")
-    thumbCorner.CornerRadius = UDim.new(0.5, 0) -- Circle
-    thumbCorner.Parent = thumb
-    local thumbScale = Instance.new("UIScale") -- For animation
-    thumbScale.Parent = thumb
-
-    -- Element Object
-    local element = {
-        Type = "Slider",
-        Name = sldConfig.Name,
-        Instance = sliderFrame,
-        Label = sliderLabel,
-        ValueLabel = valueLabel,
-        Value = currentValue,
-        SetConfig = function(newConfig) end, -- TODO
-        SetEnabled = function(enabled) end, -- TODO
-        SetValue = nil -- Defined below
-    }
-
-    -- Round value to increment
-    local function RoundToIncrement(value)
-        return math.floor(value / sldConfig.Increment + 0.5) * sldConfig.Increment
-    end
-
-    -- Update Visuals Function
-    local function UpdateVisuals(value, animate)
-        value = math.clamp(value, sldConfig.Min, sldConfig.Max)
-        local percentage = (value - sldConfig.Min) / (sldConfig.Max - sldConfig.Min)
-        percentage = math.clamp(percentage, 0, 1)
-
-        local targetFilledSize = UDim2.new(percentage, 0, 1, 0)
-        -- Position thumb centered over the end of the filled track
-        local thumbX = track.AbsolutePosition.X + track.AbsoluteSize.X * percentage
-        local targetThumbPos = UDim2.fromOffset(thumbX - thumbSize / 2, trackYPos - thumbSize / 2)
-
-        valueLabel.Text = string.format("%.*f", sldConfig.Increment < 1 and 1 or 0, value) .. sldConfig.Suffix
-
-        if animate then
-            PlayTween(filledTrack, { Size = targetFilledSize }, 0.1)
-            PlayTween(thumb, { Position = targetThumbPos }, 0.1)
-        else
-            filledTrack.Size = targetFilledSize
-            thumb.Position = targetThumbPos
-        end
-    end
-
-    -- Set Value Method
-    function element:SetValue(value, suppressCallback)
-        value = RoundToIncrement(value)
-        value = math.clamp(value, sldConfig.Min, sldConfig.Max)
-
-        if element.Value == value then return end -- No change
-
-        element.Value = value
-        UpdateVisuals(value, true)
-
-        if not suppressCallback then
-            local success, err = pcall(sldConfig.Callback, value)
-            if not success then
-                warn("Starlight: Error in slider callback for '"..sldConfig.Name.."':", err)
-            end
-        end
-    end
-
-    -- Dragging Logic
-    local function HandleInput(inputPos)
-        local relativeX = inputPos.X - track.AbsolutePosition.X
-        local percentage = math.clamp(relativeX / track.AbsoluteSize.X, 0, 1)
-        local newValue = sldConfig.Min + (sldConfig.Max - sldConfig.Min) * percentage
-        element:SetValue(newValue) -- This rounds, clamps, updates visuals, and calls callback
-    end
-
-    thumb.InputBegan:Connect(function(input)
+    end))
+    table.insert(element.Connections, interact.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            isDragging = true
-            PlayTween(thumbScale, { Scale = 1.2 }, 0.1) -- Grow thumb on drag start
-            local connection
-            connection = input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    isDragging = false
-                    PlayTween(thumbScale, { Scale = 1.0 }, 0.1) -- Shrink thumb on drag end
-                    if connection then connection:Disconnect() end
+            if dragging then
+                dragging = false
+                PlayTween(sliderMain.BaseStroke, { Transparency = 0.4 }, 0.1) -- Restore outer stroke
+                PlayTween(progress.BaseStroke, { Transparency = 0.3 }, 0.1) -- Restore inner stroke
+                -- Remove glow/highlight
+                if element.Config.Flag and element.Window.CEnabled then element.Window:SaveConfiguration() end -- Save on drag end
+            end
+        end
+    end))
+    table.insert(element.Connections, interact.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local mouseX = input.Position.X
+            local startX = sliderMain.AbsolutePosition.X
+            local width = sliderMain.AbsoluteSize.X
+            local fraction = math.clamp((mouseX - startX) / width, 0, 1)
+            local newValue = FractionToValue(fraction)
+
+            if element.CurrentValue ~= newValue then
+                element.CurrentValue = newValue
+                UpdateVisuals(newValue, false) -- Update instantly during drag
+
+                -- Continuous callback (optional)
+                if config.ContinuousCallback then
+                    pcall(config.Callback or function() end, newValue)
                 end
-            end)
+            end
         end
-    end)
+    end))
+     -- Click to set value
+    table.insert(element.Connections, interact.MouseButton1Down:Connect(function()
+        if not dragging then -- Only trigger on initial click, not during drag start
+            local mouseX = UserInputService:GetMouseLocation().X
+            local startX = sliderMain.AbsolutePosition.X
+            local width = sliderMain.AbsoluteSize.X
+            local fraction = math.clamp((mouseX - startX) / width, 0, 1)
+            local newValue = FractionToValue(fraction)
 
-    UserInputService.InputChanged:Connect(function(input)
-        if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            HandleInput(input.Position)
+            if element.CurrentValue ~= newValue then
+                element.CurrentValue = newValue
+                UpdateVisuals(newValue, true) -- Animate on click
+
+                -- Trigger main callback
+                local success, err = pcall(config.Callback or function() end, newValue)
+                if not success then warn("CosmicUI: Slider Callback Error:", err) end
+                -- No immediate save on click, save happens on drag end or Set
+            end
         end
-    end)
+    end))
 
-    -- Allow clicking on the track
-    track.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-             HandleInput(input.Position)
-             -- Optionally start dragging from track click (more complex)
+
+    -- Set Method
+    element.Set = function(self, value, silent)
+        value = math.clamp(value, config.Range[1], config.Range[2])
+        value = FractionToValue(ValueToFraction(value)) -- Ensure it snaps to increment
+
+        if self.CurrentValue == value then return end
+
+        self.CurrentValue = value
+        UpdateVisuals(self.CurrentValue, true)
+
+        if not silent then
+            local success, err = pcall(config.Callback or function() end, self.CurrentValue)
+            if not success then warn("CosmicUI: Slider Callback Error (Set):", err) end
+            if self.Config.Flag and self.Window.CEnabled then self.Window:SaveConfiguration() end
         end
-    end)
+    end
 
-    -- Initial State
-    UpdateVisuals(currentValue, false)
+    -- Update Theme Method
+    element.UpdateTheme = function(self)
+        ApplyThemeStyle(self.Instance, "Slider") -- Base frame
+        ApplyThemeStyle(self.Instance.Main, "SliderTrack")
+        ApplyThemeStyle(self.Instance.Main.Progress, "SliderFill")
+        self.Instance.Main.Information.TextColor3 = Cosmic.SelectedTheme.TextColor -- Update info label color
+    end
+    element:UpdateTheme() -- Initial call
 
-    table.insert(parentTab.Elements, element)
     return element
 end
 
---[[ TODO: Implement other elements like:
-function Starlight:_CreateColorPicker(parentTab, config) ... end
-function Starlight:_CreateKeybind(parentTab, config) ... end
-]]
+-- Input
+function Cosmic:_CreateInput(parentTab, config)
+    config.CurrentValue = config.CurrentValue or ""
+    config.PlaceholderText = config.PlaceholderText or "Enter text..."
+    config.RemoveTextAfterFocusLost = config.RemoveTextAfterFocusLost or false
+    local template = parentTab.Window.ContentFrame.Template.Input
+    local element = Cosmic:_CreateBaseElement(parentTab, config, "Input", template)
+    local inputFrame = element.Instance
+    local titleLabel = inputFrame:FindFirstChild("Title")
+    local inputInnerFrame = inputFrame:FindFirstChild("InputFrame")
+    local inputBox = inputInnerFrame:FindFirstChild("InputBox")
+
+    titleLabel.Text = config.Name
+    inputBox.Text = config.CurrentValue
+    inputBox.PlaceholderText = config.PlaceholderText
+    element.CurrentValue = config.CurrentValue
+
+    ApplyThemeStyle(inputInnerFrame, "TextBox") -- Style the inner frame
+
+    -- Adaptive Width (like Rayfield)
+    local function UpdateWidth()
+        local textBoundsX = inputBox.TextBounds.X
+        local minWidth = 50 -- Minimum width
+        local maxWidth = inputFrame.AbsoluteSize.X - titleLabel.AbsoluteSize.X - 30 -- Max available width
+        local targetWidth = math.clamp(textBoundsX + 24, minWidth, maxWidth)
+        PlayTween(inputInnerFrame, { Size = UDim2.new(0, targetWidth, 1, 0) }, 0.1)
+    end
+
+    table.insert(element.Connections, inputBox:GetPropertyChangedSignal("Text"):Connect(UpdateWidth))
+    UpdateWidth() -- Initial width
+
+    -- Focus Lost / Enter Pressed
+    table.insert(element.Connections, inputBox.FocusLost:Connect(function(enterPressed)
+        local newValue = inputBox.Text
+        if element.CurrentValue == newValue and not enterPressed and not config.RemoveTextAfterFocusLost then return end -- No change unless forced
+
+        element.CurrentValue = newValue
+        local success, err = pcall(config.Callback or function(t) print("Input:", config.Name, t) end, newValue)
+        if not success then
+            warn("CosmicUI: Input Callback Error:", err)
+            parentTab.Window:Notify({Title = "Callback Error", Content = config.Name .. ": " .. tostring(err), Icon = Cosmic.SelectedTheme.Error})
+            -- Revert text?
+            -- inputBox.Text = element.CurrentValue -- Revert on error
+        else
+            if element.Config.Flag and element.Window.CEnabled then element.Window:SaveConfiguration() end -- Save on success
+        end
+
+        if config.RemoveTextAfterFocusLost then
+            inputBox.Text = ""
+            element.CurrentValue = "" -- Update internal state too
+        end
+        UpdateWidth()
+    end))
+
+    -- Set Method
+    element.Set = function(self, text, silent)
+        text = tostring(text)
+        if self.CurrentValue == text then return end
+
+        self.CurrentValue = text
+        inputBox.Text = text
+        UpdateWidth()
+
+        if not silent then
+            local success, err = pcall(config.Callback or function() end, self.CurrentValue)
+            if not success then warn("CosmicUI: Input Callback Error (Set):", err) end
+            if self.Config.Flag and self.Window.CEnabled then self.Window:SaveConfiguration() end
+        end
+    end
+
+    -- Update Theme Method
+    element.UpdateTheme = function(self)
+        ApplyThemeStyle(self.Instance, "Input") -- Base frame
+        ApplyThemeStyle(self.Instance.InputFrame, "TextBox") -- Inner frame
+        self.Instance.InputFrame.InputBox.PlaceholderColor3 = Cosmic.SelectedTheme.PlaceholderColor
+        self.Instance.InputFrame.InputBox.TextColor3 = Cosmic.SelectedTheme.TextColor
+    end
+    element:UpdateTheme() -- Initial call
+
+    return element
+end
+
+-- Dropdown
+function Cosmic:_CreateDropdown(parentTab, config)
+    config.Options = config.Options or {}
+    config.MultipleOptions = config.MultipleOptions or false
+    config.CurrentOption = config.CurrentOption or (config.MultipleOptions and {} or (config.Options[1] and {config.Options[1]} or {})) -- Default selection logic
+    local template = parentTab.Window.ContentFrame.Template.Dropdown
+    local element = Cosmic:_CreateBaseElement(parentTab, config, "Dropdown", template)
+    local dropdownFrame = element.Instance
+    local titleLabel = dropdownFrame:FindFirstChild("Title")
+    local selectedLabel = dropdownFrame:FindFirstChild("Selected")
+    local toggleButton = dropdownFrame:FindFirstChild("Toggle")
+    local listFrame = dropdownFrame:FindFirstChild("List")
+    local listLayout = listFrame:FindFirstChild("UIListLayout")
+    local interactButton = dropdownFrame:FindFirstChild("Interact")
+
+    titleLabel.Text = config.Name
+    element.CurrentOption = config.CurrentOption -- Store as table
+    element.IsOpen = false
+
+    local function UpdateSelectedText()
+        if config.MultipleOptions then
+            local count = #element.CurrentOption
+            if count == 0 then selectedLabel.Text = "None"
+            elseif count == 1 then selectedLabel.Text = element.CurrentOption[1]
+            else selectedLabel.Text = "Various (" .. count .. ")" end
+        else
+            selectedLabel.Text = element.CurrentOption[1] or "None"
+        end
+    end
+
+    local function PopulateOptions()
+        -- Clear existing options
+        for _, child in ipairs(listFrame:GetChildren()) do
+            if child:IsA("Frame") and child.Name ~= "Template" then child:Destroy() end
+        end
+        -- Add new options
+        for i, optionName in ipairs(config.Options) do
+            local optionFrame = listFrame.Template:Clone()
+            optionFrame.Name = optionName
+            optionFrame.Visible = true
+            optionFrame.LayoutOrder = i
+            ApplyThemeStyle(optionFrame, "DropdownOption") -- Initial style
+            optionFrame.Parent = listFrame
+
+            local optionLabel = optionFrame:FindFirstChild("Title")
+            optionLabel.Text = optionName
+
+            local optionInteract = optionFrame:FindFirstChild("Interact")
+
+            -- Check if selected and apply style
+            if table.find(element.CurrentOption, optionName) then
+                ApplyThemeStyle(optionFrame, "DropdownOptionSelected")
+            end
+
+            table.insert(element.Connections, optionInteract.MouseButton1Click:Connect(function()
+                local wasSelected = table.find(element.CurrentOption, optionName)
+                local changed = false
+
+                if config.MultipleOptions then
+                    if wasSelected then
+                        table.remove(element.CurrentOption, table.find(element.CurrentOption, optionName))
+                        ApplyThemeStyle(optionFrame, "DropdownOption") -- Deselect style
+                        changed = true
+                    else
+                        table.insert(element.CurrentOption, optionName)
+                        ApplyThemeStyle(optionFrame, "DropdownOptionSelected") -- Select style
+                        changed = true
+                    end
+                else -- Single option selection
+                    if not wasSelected then
+                        -- Deselect previous
+                        if element.CurrentOption[1] then
+                            local prevOptionFrame = listFrame:FindFirstChild(element.CurrentOption[1])
+                            if prevOptionFrame then ApplyThemeStyle(prevOptionFrame, "DropdownOption") end
+                        end
+                        -- Select new
+                        element.CurrentOption = {optionName}
+                        ApplyThemeStyle(optionFrame, "DropdownOptionSelected")
+                        changed = true
+                        element:_ToggleList(false) -- Close list on single select
+                    end
+                end
+
+                if changed then
+                    UpdateSelectedText()
+                    local success, err = pcall(config.Callback or function(o) print("Dropdown:", config.Name, o) end, element.CurrentOption)
+                    if not success then warn("CosmicUI: Dropdown Callback Error:", err) end
+                    if element.Config.Flag and element.Window.CEnabled then element.Window:SaveConfiguration() end
+                end
+            end))
+
+             -- Hover effect for options
+            table.insert(element.Connections, optionInteract.MouseEnter:Connect(function()
+                if not table.find(element.CurrentOption, optionName) then
+                    PlayTween(optionFrame, { BackgroundColor3 = Cosmic.SelectedTheme.ElementBackgroundHover }, 0.1)
+                end
+            end))
+            table.insert(element.Connections, optionInteract.MouseLeave:Connect(function()
+                 if not table.find(element.CurrentOption, optionName) then
+                    PlayTween(optionFrame, { BackgroundColor3 = Cosmic.SelectedTheme.DropdownUnselected }, 0.1)
+                 end
+            end))
+        end
+        -- Update list frame canvas size (important for scrolling)
+        listFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
+    end
+
+    element._ToggleList = function(self, forceState)
+        local targetOpen = forceState == nil and not self.IsOpen or forceState
+        if self.IsOpen == targetOpen then return end
+        self.IsOpen = targetOpen
+
+        local listHeight = math.min(listLayout.AbsoluteContentSize.Y + 10, 135) -- Max height 135
+        local targetSizeY = (Cosmic.SelectedTheme.ElementHeight or 38) + (self.IsOpen and listHeight + 5 or 0)
+        local targetRotation = self.IsOpen and 0 or 180
+
+        PlayTween(dropdownFrame, { Size = UDim2.new(1, -10, 0, targetSizeY) }, 0.3)
+        PlayTween(toggleButton, { Rotation = targetRotation }, 0.3)
+
+        if self.IsOpen then
+            listFrame.Visible = true
+            ApplyThemeStyle(listFrame, "DropdownList") -- Style the list frame itself
+            PlayTween(listFrame, { BackgroundTransparency = 0 }, 0.2)
+            PlayTween(listFrame, { ScrollBarImageTransparency = 0.7 }, 0.2)
+            -- Animate options visibility? (Optional)
+        else
+            PlayTween(listFrame, { BackgroundTransparency = 1 }, 0.2)
+            PlayTween(listFrame, { ScrollBarImageTransparency = 1 }, 0.2)
+            task.delay(0.2, function() if listFrame and not self.IsOpen then listFrame.Visible = false end end)
+        end
+    end
+
+    -- Initial State
+    ApplyThemeStyle(toggleButton, "ImageButton") -- Basic style for arrow
+    toggleButton.Rotation = 180 -- Start closed
+    listFrame.Visible = false
+    PopulateOptions()
+    UpdateSelectedText()
+
+    -- Click to toggle list
+    table.insert(element.Connections, interactButton.MouseButton1Click:Connect(function() element:_ToggleList() end))
+
+    -- Set Method
+    element.Set = function(self, options, silent) -- options should be a table
+        if type(options) ~= "table" then options = {options} end -- Ensure table
+
+        local newSelection = {}
+        local changed = false
+        for _, opt in ipairs(options) do
+            if table.find(config.Options, opt) then -- Only add valid options
+                table.insert(newSelection, opt)
+            end
+        end
+
+        if not config.MultipleOptions and #newSelection > 1 then
+            newSelection = {newSelection[1]} -- Take first if single select
+        end
+
+        -- Check if selection actually changed
+        if #self.CurrentOption ~= #newSelection then
+            changed = true
+        else
+            for i = 1, #newSelection do
+                if self.CurrentOption[i] ~= newSelection[i] then changed = true; break end
+            end
+        end
+
+        if not changed then return end
+
+        self.CurrentOption = newSelection
+        PopulateOptions() -- Repopulate to update visual selection state
+        UpdateSelectedText()
+
+        if not silent then
+            local success, err = pcall(config.Callback or function() end, self.CurrentOption)
+            if not success then warn("CosmicUI: Dropdown Callback Error (Set):", err) end
+            if self.Config.Flag and self.Window.CEnabled then self.Window:SaveConfiguration() end
+        end
+    end
+
+    -- Refresh Method (like Rayfield)
+    element.Refresh = function(self, newOptionsTable)
+        config.Options = newOptionsTable or {}
+        -- Filter CurrentOption to remove options no longer present
+        local validSelection = {}
+        for _, opt in ipairs(self.CurrentOption) do
+            if table.find(config.Options, opt) then table.insert(validSelection, opt) end
+        end
+        self.CurrentOption = validSelection
+        -- Repopulate and update display
+        PopulateOptions()
+        UpdateSelectedText()
+        -- Optionally trigger callback if selection changed due to refresh?
+    end
+
+    -- Update Theme Method
+    element.UpdateTheme = function(self)
+        ApplyThemeStyle(self.Instance, "Dropdown") -- Base frame
+        ApplyThemeStyle(self.Instance.Toggle, "ImageButton") -- Arrow
+        self.Instance.Selected.TextColor3 = Cosmic.SelectedTheme.TextSecondary -- Selected text color
+        if self.IsOpen then ApplyThemeStyle(self.Instance.List, "DropdownList") end
+        -- Update options theme
+        for _, child in ipairs(self.Instance.List:GetChildren()) do
+            if child:IsA("Frame") and child.Name ~= "Template" then
+                if table.find(self.CurrentOption, child.Name) then
+                    ApplyThemeStyle(child, "DropdownOptionSelected")
+                else
+                    ApplyThemeStyle(child, "DropdownOption")
+                end
+                child.Title.TextColor3 = Cosmic.SelectedTheme.TextColor
+            end
+        end
+    end
+    element:UpdateTheme() -- Initial call
+
+    return element
+end
+
+-- ...existing code...
+
+-- Keybind
+function Cosmic:_CreateKeybind(parentTab, config)
+    config.CurrentKeybind = config.CurrentKeybind or "None"
+    config.HoldToInteract = config.HoldToInteract or false
+    config.CallOnChange = config.CallOnChange or false -- If true, callback runs when key is set, not pressed
+    local template = parentTab.Window.ContentFrame.Template.Keybind
+    local element = Cosmic:_CreateBaseElement(parentTab, config, "Keybind", template)
+    local keybindFrame = element.Instance
+    local titleLabel = keybindFrame:FindFirstChild("Title")
+    local keybindInnerFrame = keybindFrame:FindFirstChild("KeybindFrame")
+    local keybindBox = keybindInnerFrame:FindFirstChild("KeybindBox") -- This is a TextButton now
+
+    titleLabel.Text = config.Name
+    keybindBox.Text = config.CurrentKeybind
+    element.CurrentKeybind = config.CurrentKeybind
+    element.IsListening = false
+
+    ApplyThemeStyle(keybindInnerFrame, "TextBox") -- Use input style for frame
+
+    -- Click to Listen
+    table.insert(element.Connections, keybindBox.MouseButton1Click:Connect(function()
+        if not element.IsListening then
+            element.IsListening = true
+            keybindBox.Text = "..."
+            keybindBox.TextColor3 = Cosmic.SelectedTheme.Accent or Cosmic.SelectedTheme.Primary
+            -- Capture next input
+        else -- Click again to cancel
+            element.IsListening = false
+            keybindBox.Text = element.CurrentKeybind
+            keybindBox.TextColor3 = Cosmic.SelectedTheme.TextColor
+        end
+    end))
+
+    -- Input Listener
+    local inputConnection
+    inputConnection = UserInputService.InputBegan:Connect(function(input, processed)
+        if element.IsListening and not processed then
+            local keyCode = input.KeyCode
+            if keyCode ~= Enum.KeyCode.Unknown then
+                local keyName = string.gsub(tostring(keyCode), "Enum.KeyCode.", "")
+
+                -- Handle special keys / cancel
+                if keyCode == Enum.KeyCode.Escape then
+                    keyName = "None" -- Cancel binding
+                elseif keyCode == Enum.KeyCode.Delete or keyCode == Enum.KeyCode.Backspace then
+                     keyName = "None" -- Clear binding
+                end
+
+                element.IsListening = false
+                element.CurrentKeybind = keyName
+                keybindBox.Text = keyName
+                keybindBox.TextColor3 = Cosmic.SelectedTheme.TextColor
+
+                if config.CallOnChange then
+                    local success, err = pcall(config.Callback or function(k) print("Keybind Set:", config.Name, k) end, keyName)
+                    if not success then warn("CosmicUI: Keybind Callback Error (OnChange):", err) end
+                end
+                if element.Config.Flag and element.Window.CEnabled then element.Window:SaveConfiguration() end
+            end
+        elseif not config.CallOnChange and not element.IsListening and element.CurrentKeybind ~= "None" and input.KeyCode == Enum.KeyCode[element.CurrentKeybind] and not processed then
+            -- Keybind Pressed Logic (HoldToInteract etc.)
+            if not config.HoldToInteract then
+                local success, err = pcall(config.Callback or function() print("Keybind Pressed:", config.Name) end)
+                if not success then warn("CosmicUI: Keybind Callback Error (Press):", err) end
+            else
+                -- Hold logic
+                local held = true
+                local changedConn
+                changedConn = input.Changed:Connect(function(prop)
+                    if prop == "UserInputState" and input.UserInputState == Enum.UserInputState.End then
+                        held = false
+                        if changedConn then changedConn:Disconnect() end
+                        pcall(config.Callback or function() end, false) -- Call with false when released
+                    end
+                end)
+                task.spawn(function()
+                    while held do
+                        pcall(config.Callback or function() end, true) -- Call with true while held
+                        RunService.Heartbeat:Wait() -- Wait a frame
+                    end
+                end)
+            end
+        end
+    end)
+    table.insert(element.Connections, inputConnection) -- Store connection for cleanup
+
+    -- Set Method
+    element.Set = function(self, keyName, silent)
+        keyName = tostring(keyName)
+        -- Validate keyName? (Check if Enum.KeyCode[keyName] exists?)
+        if self.CurrentKeybind == keyName then return end
+
+        self.CurrentKeybind = keyName
+        keybindBox.Text = keyName
+        if self.IsListening then -- Cancel listening if Set is called
+            self.IsListening = false
+            keybindBox.TextColor3 = Cosmic.SelectedTheme.TextColor
+        end
+
+        if not silent then
+            if config.CallOnChange then
+                local success, err = pcall(config.Callback or function() end, keyName)
+                if not success then warn("CosmicUI: Keybind Callback Error (Set/OnChange):", err) end
+            end
+            if self.Config.Flag and self.Window.CEnabled then self.Window:SaveConfiguration() end
+        end
+    end
+
+    -- Update Theme Method
+    element.UpdateTheme = function(self)
+        ApplyThemeStyle(self.Instance, "Keybind") -- Base frame
+        ApplyThemeStyle(self.Instance.KeybindFrame, "TextBox") -- Inner frame
+        self.Instance.KeybindFrame.KeybindBox.TextColor3 = self.IsListening and (Cosmic.SelectedTheme.Accent or Cosmic.SelectedTheme.Primary) or Cosmic.SelectedTheme.TextColor
+    end
+    element:UpdateTheme() -- Initial call
+
+    return element
+end
+
+-- Label
+function Cosmic:_CreateLabel(parentTab, config)
+    local template = parentTab.Window.ContentFrame.Template.Label
+    local element = Cosmic:_CreateBaseElement(parentTab, config, "Label", template)
+    local labelFrame = element.Instance
+    local titleLabel = labelFrame:FindFirstChild("Title")
+    local icon = labelFrame:FindFirstChild("Icon")
+
+    titleLabel.Text = config.Text or config.Name -- Use Text field, fallback to Name
+    icon.Visible = false -- Hide icon by default
+
+    -- Handle optional icon and color override (like Rayfield)
+    if config.Icon then
+        icon.Visible = true
+        local asset = getIcon(config.Icon)
+        icon.Image = "rbxassetid://" .. asset.id
+        icon.ImageRectOffset = asset.imageRectOffset
+        icon.ImageRectSize = asset.imageRectSize
+        titleLabel.Position = UDim2.new(0, 45, 0.5, 0) -- Indent text
+        titleLabel.Size = UDim2.new(1, -55, 1, 0)
+    else
+        titleLabel.Position = UDim2.new(0, 10, 0.5, 0)
+        titleLabel.Size = UDim2.new(1, -20, 1, 0)
+    end
+
+    local ignoreTheme = config.IgnoreTheme or false
+    local customColor = config.Color
+
+    element.UpdateTheme = function(self)
+        local theme = Cosmic.SelectedTheme
+        ApplyThemeStyle(self.Instance, "Label") -- Apply base label style
+        if ignoreTheme and customColor then
+            self.Instance.BackgroundColor3 = customColor
+            if self.Instance.BaseStroke then self.Instance.BaseStroke.Color = customColor * 0.8 end -- Darker stroke
+            self.Instance.Title.TextColor3 = customColor.R*0.21 + customColor.G*0.72 + customColor.B*0.07 > 0.5 and Color3.fromRGB(0,0,0) or Color3.fromRGB(255,255,255) -- Auto text color
+            self.Instance.Icon.ImageColor3 = self.Instance.Title.TextColor3
+        else
+            -- Use theme colors
+            self.Instance.BackgroundColor3 = theme.SecondaryElementBackground or theme.ElementBackground
+            if self.Instance.BaseStroke then self.Instance.BaseStroke.Color = theme.SecondaryElementStroke or theme.ElementStroke end
+            self.Instance.Title.TextColor3 = theme.TextColor
+            self.Instance.Icon.ImageColor3 = theme.TextColor
+        end
+    end
+
+    element.Set = function(self, newText, newIcon, newColor)
+        self.Instance.Title.Text = newText or self.Instance.Title.Text
+        config.Text = newText or config.Text -- Update config text
+
+        if newIcon ~= nil then
+            config.Icon = newIcon
+            if newIcon and newIcon ~= 0 then
+                 self.Instance.Icon.Visible = true
+                 local asset = getIcon(newIcon)
+                 self.Instance.Icon.Image = "rbxassetid://" .. asset.id
+                 self.Instance.Icon.ImageRectOffset = asset.imageRectOffset
+                 self.Instance.Icon.ImageRectSize = asset.imageRectSize
+                 self.Instance.Title.Position = UDim2.new(0, 45, 0.5, 0)
+                 self.Instance.Title.Size = UDim2.new(1, -55, 1, 0)
+            else
+                 self.Instance.Icon.Visible = false
+                 self.Instance.Title.Position = UDim2.new(0, 10, 0.5, 0)
+                 self.Instance.Title.Size = UDim2.new(1, -20, 1, 0)
+            end
+        end
+        if newColor ~= nil then
+            config.Color = newColor
+            customColor = newColor -- Update local override
+        end
+        self:UpdateTheme() -- Re-apply theme/color
+    end
+
+    element:UpdateTheme() -- Initial call
+
+    return element
+end
+
+-- Paragraph
+function Cosmic:_CreateParagraph(parentTab, config)
+    local template = parentTab.Window.ContentFrame.Template.Paragraph
+    local element = Cosmic:_CreateBaseElement(parentTab, config, "Paragraph", template)
+    local paragraphFrame = element.Instance
+    local titleLabel = paragraphFrame:FindFirstChild("Title")
+    local contentLabel = paragraphFrame:FindFirstChild("Content")
+
+    titleLabel.Text = config.Title or config.Name
+    contentLabel.Text = config.Content or ""
+
+    element.Set = function(self, newTitle, newContent)
+        if newTitle then
+            self.Instance.Title.Text = newTitle
+            config.Title = newTitle
+        end
+        if newContent then
+            self.Instance.Content.Text = newContent
+            config.Content = newContent
+            -- Might need to recalculate size if dynamic height is desired
+        end
+    end
+
+    element.UpdateTheme = function(self)
+        ApplyThemeStyle(self.Instance, "Paragraph") -- Base style
+        self.Instance.BackgroundColor3 = Cosmic.SelectedTheme.SecondaryElementBackground or Cosmic.SelectedTheme.ElementBackground
+        if self.Instance.BaseStroke then self.Instance.BaseStroke.Color = Cosmic.SelectedTheme.SecondaryElementStroke or Cosmic.SelectedTheme.ElementStroke end
+        self.Instance.Title.TextColor3 = Cosmic.SelectedTheme.TextColor
+        self.Instance.Content.TextColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor
+    end
+    element:UpdateTheme()
+
+    return element
+end
+
+-- Section
+function Cosmic:_CreateSection(parentTab, sectionName)
+    local config = { Name = sectionName, _IsInternal = true } -- Internal, no flag
+    local template = parentTab.Window.ContentFrame.Template.SectionTitle
+    local element = Cosmic:_CreateBaseElement(parentTab, config, "Section", template)
+    local sectionFrame = element.Instance
+    local titleLabel = sectionFrame:FindFirstChild("Title")
+
+    titleLabel.Text = sectionName
+
+    element.Set = function(self, newName)
+        self.Instance.Title.Text = newName
+        config.Name = newName
+    end
+
+    element.UpdateTheme = function(self)
+        -- Sections usually don't have background/stroke, just text
+        self.Instance.BackgroundTransparency = 1
+        if self.Instance.BaseStroke then self.Instance.BaseStroke:Destroy() end
+        if self.Instance:FindFirstChildWhichIsA("UICorner") then self.Instance:FindFirstChildWhichIsA("UICorner"):Destroy() end
+        self.Instance.Title.TextColor3 = Cosmic.SelectedTheme.TextSecondary or Cosmic.SelectedTheme.TextColor
+        self.Instance.Title.TextTransparency = 0.4 -- Dimmer like Rayfield
+    end
+    element:UpdateTheme()
+
+    -- Add spacing before section if not the first element
+    if element.Instance.LayoutOrder > 1 then
+        local spacing = Instance.new("Frame")
+        spacing.Name = "SectionSpacing"
+        spacing.Size = UDim2.new(1, 0, 0, 5) -- Small vertical space
+        spacing.BackgroundTransparency = 1
+        spacing.LayoutOrder = element.Instance.LayoutOrder - 1 -- Place before section
+        spacing.Parent = parentTab.ContentPage
+        table.insert(element.Connections, spacing.Destroying:Connect(function() end)) -- Track for cleanup?
+    end
+
+
+    return element
+end
+
+-- Divider
+function Cosmic:_CreateDivider(parentTab)
+    local config = { Name = "Divider", _IsInternal = true }
+    local template = parentTab.Window.ContentFrame.Template.Divider
+    local element = Cosmic:_CreateBaseElement(parentTab, config, "Divider", template)
+    local dividerFrame = element.Instance
+    local line = dividerFrame:FindFirstChild("Divider")
+
+    element.Set = function(self, visible) -- Allow hiding/showing
+        self.Instance.Visible = visible == true
+    end
+
+    element.UpdateTheme = function(self)
+        self.Instance.BackgroundTransparency = 1
+        if self.Instance.BaseStroke then self.Instance.BaseStroke:Destroy() end
+        if self.Instance:FindFirstChildWhichIsA("UICorner") then self.Instance:FindFirstChildWhichIsA("UICorner"):Destroy() end
+        line.BackgroundColor3 = Cosmic.SelectedTheme.ElementStroke or Color3.fromRGB(50,50,50)
+        line.BackgroundTransparency = 0.85 -- Subtle like Rayfield
+    end
+    element:UpdateTheme()
+
+    return element
+end
+
+-- Color Picker (Structure based on Rayfield, simplified interaction)
+function Cosmic:_CreateColorPicker(parentTab, config)
+    config.Color = config.Color or Color3.new(1, 1, 1)
+    local template = parentTab.Window.ContentFrame.Template.ColorPicker
+    local element = Cosmic:_CreateBaseElement(parentTab, config, "ColorPicker", template)
+    local cpFrame = element.Instance
+    local titleLabel = cpFrame:FindFirstChild("Title")
+    local display = cpFrame:FindFirstChild("Display") -- The small color preview square
+    local interact = cpFrame:FindFirstChild("Interact")
+
+    titleLabel.Text = config.Name
+    element.Color = config.Color
+    element.IsOpen = false
+
+    ApplyThemeStyle(display, "ColorPickerDisplay")
+    display.BackgroundColor3 = element.Color
+
+    -- Placeholder: Full Color Picker UI (like Rayfield's) needs to be built here
+    -- This would involve:
+    -- 1. Creating the popup frame (Background, MainCP, ColorSlider, RGB inputs, Hex input)
+    -- 2. Implementing the complex dragging logic for MainCP and ColorSlider
+    -- 3. Handling HSV <-> RGB <-> Hex conversions and input validation
+    -- 4. Animating the popup open/close
+
+    local function TogglePicker(open)
+        element.IsOpen = open
+        if open then
+            -- Show and animate the full picker UI
+            print("Color Picker Opened (Not Implemented)")
+            -- Example: TweenSize, TweenPosition, set transparencies
+        else
+            -- Hide and animate the full picker UI
+            print("Color Picker Closed (Not Implemented)")
+        end
+    end
+
+    table.insert(element.Connections, interact.MouseButton1Click:Connect(function()
+        TogglePicker(not element.IsOpen)
+    end))
+
+    -- Set Method
+    element.Set = function(self, color, silent)
+        if type(color) ~= "Color3" then return end
+        if self.Color == color then return end
+
+        self.Color = color
+        display.BackgroundColor3 = color
+        -- Update internal picker UI state if open
+
+        if not silent then
+            local success, err = pcall(config.Callback or function(c) print("ColorPicker:", config.Name, c) end, self.Color)
+            if not success then warn("CosmicUI: ColorPicker Callback Error (Set):", err) end
+            if self.Config.Flag and self.Window.CEnabled then self.Window:SaveConfiguration() end
+        end
+    end
+
+    -- Update Theme Method
+    element.UpdateTheme = function(self)
+        ApplyThemeStyle(self.Instance, "ColorPicker") -- Base frame
+        ApplyThemeStyle(self.Instance.Display, "ColorPickerDisplay") -- Display square
+        -- Update theme for the full picker UI elements when implemented
+    end
+    element:UpdateTheme()
+
+    return element
+end
+
+
+--[[ Configuration Saving/Loading ]]--
+function Cosmic:SaveConfiguration()
+    if not self.CEnabled or not Cosmic.GlobalLoaded then return end
+    if not writefile then return end -- Need file writing
+
+    local data = {}
+    for flagName, element in pairs(Cosmic.Flags) do
+        -- Check if element belongs to this window instance
+        if element and element.Window == self then
+            local value
+            if element.Type == "ColorPicker" then
+                value = PackColor(element.Color)
+            elseif element.Type == "Toggle" then
+                value = element.CurrentValue
+            elseif element.Type == "Slider" then
+                value = element.CurrentValue
+            elseif element.Type == "Input" then
+                value = element.CurrentValue
+            elseif element.Type == "Dropdown" then
+                value = element.CurrentOption -- Save the table
+            elseif element.Type == "Keybind" then
+                value = element.CurrentKeybind
+            end
+            if value ~= nil then data[flagName] = value end
+        end
+    end
+
+    local success, encodedData = pcall(HttpService.JSONEncode, HttpService, data)
+    if success then
+        local filePath = self.CFolderName .. "/" .. self.CFileName .. ".cosmic" -- Use .cosmic extension
+        -- Ensure folder exists
+        if not isfolder(self.CFolderName) then makefolder(self.CFolderName) end
+        writefile(filePath, encodedData)
+        print("CosmicUI: Configuration saved to", filePath)
+    else
+        warn("CosmicUI: Failed to encode configuration for saving:", encodedData)
+    end
+end
+
+function Cosmic:LoadConfiguration()
+    if not self.CEnabled then return end
+    if not readfile or not isfile then return end -- Need file reading
+
+    local filePath = self.CFolderName .. "/" .. self.CFileName .. ".cosmic"
+    if not isfile(filePath) then
+        print("CosmicUI: No configuration file found at", filePath)
+        return
+    end
+
+    local fileContent = readfile(filePath)
+    if not fileContent then
+        warn("CosmicUI: Failed to read configuration file:", filePath)
+        return
+    end
+
+    local success, decodedData = pcall(HttpService.JSONDecode, HttpService, fileContent)
+    if not success or type(decodedData) ~= "table" then
+        warn("CosmicUI: Failed to decode configuration file:", filePath, decodedData)
+        return
+    end
+
+    local loadedCount = 0
+    for flagName, savedValue in pairs(decodedData) do
+        local element = Cosmic.Flags[flagName]
+        -- Check if element exists and belongs to this window
+        if element and element.Window == self and element.Set then
+            local valueToSet = savedValue
+            if element.Type == "ColorPicker" and type(savedValue) == "table" then
+                valueToSet = UnpackColor(savedValue)
+            end
+            -- Add type checks/conversions if necessary for other types
+
+            -- Use pcall to safely set the value silently
+            local setSuccess, setError = pcall(element.Set, element, valueToSet, true) -- Pass true for silent
+            if setSuccess then
+                loadedCount = loadedCount + 1
+            else
+                 warn("CosmicUI: Error loading flag '" .. flagName .. "':", setError)
+            end
+        end
+    end
+
+    if loadedCount > 0 then
+        self:Notify({Title = "Configuration Loaded", Content = loadedCount .. " settings loaded.", Duration = 4, Icon = Cosmic.SelectedTheme.Icons.Settings})
+    end
+    print("CosmicUI: Configuration loaded from", filePath)
+end
+
+--[[ Key System (Placeholder Logic) ]]--
+function Cosmic:_CheckKeySystem()
+    local keySettings = self.Config.KeySettings
+    local fileName = keySettings.FileName or "CosmicKey"
+    local keyFolder = "CosmicUI_Keys" -- Separate folder for keys
+
+    -- 1. Check if key file exists and contains a valid key
+    if isfolder and isfile and readfile then
+        if not isfolder(keyFolder) then makefolder(keyFolder) end
+        local filePath = keyFolder .. "/" .. fileName .. ".cosmicKey"
+        if isfile(filePath) then
+            local savedKey = readfile(filePath)
+            if savedKey and self:_ValidateKey(savedKey) then
+                print("CosmicUI: Valid key found in file.")
+                return true -- Key is valid
+            end
+        end
+    end
+
+    -- 2. If no valid saved key, show Key UI (Not Implemented Here)
+    --    This would involve creating a separate ScreenGui, handling input,
+    --    validating against keySettings.Key (fetching if needed),
+    --    saving the key if valid and keySettings.SaveKey is true,
+    --    handling attempts, and kicking the player.
+    warn("CosmicUI: Key System UI not implemented. Assuming key check fails.")
+    self:Notify({Title = "Key Required", Content = "This script requires a key (Key System UI not implemented).", Duration = 10, Icon = Cosmic.SelectedTheme.Error})
+
+    return false -- Assume key check fails if UI isn't shown/validated
+end
+
+function Cosmic:_ValidateKey(inputKey)
+    local keySettings = self.Config.KeySettings
+    local validKeys = keySettings.Key or {}
+    if type(validKeys) == "string" then validKeys = {validKeys} end -- Ensure table
+
+    -- Fetch keys if needed (Simplified - needs proper timeout/error handling)
+    if keySettings.GrabKeyFromSite then
+        local fetchedKeys = {}
+        for _, keyUrl in ipairs(validKeys) do
+            local success, content = pcall(game.HttpGet, game, keyUrl, true)
+            if success and content then
+                -- Basic cleaning, adjust as needed
+                local cleanedKey = content:match("^%s*(.-)%s*$")
+                if cleanedKey and #cleanedKey > 0 then table.insert(fetchedKeys, cleanedKey) end
+            else
+                warn("CosmicUI: Failed to fetch key from", keyUrl)
+            end
+        end
+        validKeys = fetchedKeys
+    end
+
+    -- Check input against valid keys
+    for _, validKey in ipairs(validKeys) do
+        if inputKey == validKey then return true end
+    end
+
+    return false
+end
+
+--[[ Discord Invite (Placeholder Logic) ]]--
+function Cosmic:_HandleDiscordInvite()
+     local discordSettings = self.Config.Discord
+     local inviteCode = discordSettings.Invite
+     local remember = discordSettings.RememberJoins
+     local inviteFolder = "CosmicUI_Invites"
+     local filePath = inviteFolder .. "/" .. inviteCode .. ".invited"
+
+     if not request then return end -- Need request function
+
+     -- Check if already remembered
+     if remember and isfolder and isfile and readfile then
+         if not isfolder(inviteFolder) then makefolder(inviteFolder) end
+         if isfile(filePath) then
+             print("CosmicUI: Discord invite already remembered:", inviteCode)
+             return
+         end
+     end
+
+     -- Attempt to send invite request
+     local success, result = pcall(request, {
+         Url = 'http://127.0.0.1:6463/rpc?v=1',
+         Method = 'POST',
+         Headers = { ['Content-Type'] = 'application/json', Origin = 'https://discord.com' },
+         Body = HttpService:JSONEncode({
+             cmd = 'INVITE_BROWSER',
+             nonce = HttpService:GenerateGUID(false),
+             args = { code = inviteCode }
+         })
+     })
+
+     if success then
+         print("CosmicUI: Discord invite request sent for:", inviteCode)
+         -- Remember if needed
+         if remember and writefile then
+             if not isfolder(inviteFolder) then makefolder(inviteFolder) end
+             writefile(filePath, "Invited")
+         end
+     else
+         warn("CosmicUI: Failed to send Discord invite request:", result)
+     end
+end
+
+--[[ Settings Tab Content (Placeholder) ]]--
+function Cosmic:_CreateSettingsContent(settingsTab)
+    -- Placeholder: Add elements to the settingsTab based on internal settings
+    -- Similar to Rayfield's createSettings function
+    settingsTab:CreateLabel({ Text = "Cosmic UI Settings (Placeholder)" })
+    settingsTab:CreateToggle({ Name = "Example Setting", CurrentValue = true, Callback = function(v) print("Setting toggled:", v) end})
+    -- Add controls for theme selection, keybinds, etc.
+end
+
 
 --[[ Initialization ]]--
-function Starlight.Init(customTheme)
-    -- Merge custom theme if provided (simple merge, override)
-    if customTheme and type(customTheme) == "table" then
-        for k, v in pairs(customTheme) do
-            if type(v) == "table" and type(Starlight.Theme[k]) == "table" then
-                -- Deep merge for nested tables like Icons (optional)
-                for sk, sv in pairs(v) do Starlight.Theme[k][sk] = sv end
-            else
-                Starlight.Theme[k] = v
+function Cosmic.Init(customThemes)
+    -- Merge custom themes
+    if customThemes and type(customThemes) == "table" then
+        for name, themeData in pairs(customThemes) do
+            if type(themeData) == "table" then
+                Cosmic.Themes[name] = themeData
+                print("Cosmic UI: Added/Updated custom theme:", name)
             end
         end
-        print("Starlight: Custom theme applied.")
     end
 
-    print("Starlight UI Initialized. Theme:", Starlight.Theme.Name)
-    -- Return the library table itself, user calls methods like Starlight:CreateWindow()
-    return Starlight
+    print("Cosmic UI Initialized. Version:", Cosmic.BuildVersion)
+    return Cosmic -- Return the library table itself
 end
 
-return Starlight.Init() -- Initialize and return the library instance immediately
+-- Return the initialized library
+return Cosmic.Init()
