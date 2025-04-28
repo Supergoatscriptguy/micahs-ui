@@ -393,7 +393,8 @@ function Starlight:CreateWindow(config)
         -- Animation: Fade In + Scale Up from center
         self.MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
         self.MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0) -- Center temporarily
-        self.MainFrame.Size = config.Size * 0.9
+        -- Multiply components individually
+        self.MainFrame.Size = UDim2.new(config.Size.X.Scale * 0.9, config.Size.X.Offset * 0.9, config.Size.Y.Scale * 0.9, config.Size.Y.Offset * 0.9)
         self.MainFrame.Transparency = 1
         self.Shadow.BackgroundTransparency = 1
 
@@ -417,7 +418,8 @@ function Starlight:CreateWindow(config)
 
         local hideTween = PlayTween(self.MainFrame, {
             Transparency = 1,
-            Size = config.Size * 0.9,
+            -- Multiply components individually
+            Size = UDim2.new(config.Size.X.Scale * 0.9, config.Size.X.Offset * 0.9, config.Size.Y.Scale * 0.9, config.Size.Y.Offset * 0.9),
             Position = currentPosUDim -- Stay centered while scaling
         })
         PlayTween(self.Shadow, { BackgroundTransparency = 1 })
