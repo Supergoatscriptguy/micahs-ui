@@ -136,16 +136,28 @@ Cosmic.Themes = {
         }
     },
     -- Add other Rayfield themes here, adapting colors slightly if needed for the Cosmic style
-    ["Default"] = RayfieldLibrary.Theme.Default, -- Assuming RayfieldLibrary is accessible or copy themes
-    ["Ocean"] = RayfieldLibrary.Theme.Ocean,
-    ["AmberGlow"] = RayfieldLibrary.Theme.AmberGlow,
-    ["Light"] = RayfieldLibrary.Theme.Light,
-    ["Amethyst"] = RayfieldLibrary.Theme.Amethyst,
-    ["Green"] = RayfieldLibrary.Theme.Green,
-    ["Bloom"] = RayfieldLibrary.Theme.Bloom,
-    ["DarkBlue"] = RayfieldLibrary.Theme.DarkBlue,
-    ["Serenity"] = RayfieldLibrary.Theme.Serenity,
+    -- ["Default"] = RayfieldLibrary.Theme.Default, -- Assuming RayfieldLibrary is accessible or copy themes
+    -- ["Ocean"] = RayfieldLibrary.Theme.Ocean,
+    -- ["AmberGlow"] = RayfieldLibrary.Theme.AmberGlow,
+    -- ["Light"] = RayfieldLibrary.Theme.Light,
+    -- ["Amethyst"] = RayfieldLibrary.Theme.Amethyst,
+    -- ["Green"] = RayfieldLibrary.Theme.Green,
+    -- ["Bloom"] = RayfieldLibrary.Theme.Bloom,
+    -- ["DarkBlue"] = RayfieldLibrary.Theme.DarkBlue,
+    -- ["Serenity"] = RayfieldLibrary.Theme.Serenity,
     -- Add more themes...
+    -- TODO: Copy the actual theme data from Rayfield themes here instead of referencing RayfieldLibrary
+    -- Example structure for a copied theme:
+    -- ["Ocean"] = {
+    --    Name = "Ocean",
+    --    TextColor = Color3.fromRGB(210, 220, 255),
+    --    Background = Color3.fromRGB(20, 30, 50),
+    --    -- ... other properties copied from Rayfield's Ocean theme ...
+    --    Icons = { -- Ensure Icons table exists for each theme or handle fallback
+    --        DefaultTab = "rbxassetid://...",
+    --        -- ... other icons ...
+    --    }
+    -- },
 }
 Cosmic.SelectedTheme = Cosmic.Themes["Cosmic Dark"] -- Default theme
 
@@ -444,7 +456,15 @@ function Cosmic:CreateWindow(config)
     config.ShowTopbar = config.ShowTopbar ~= false
     config.Icon = config.Icon -- Asset ID or Lucide Name
     config.Theme = config.Theme or "Cosmic Dark" -- Theme name or table
-    config.TopbarHeight = config.TopbarHeight or (Cosmic.Themes[config.Theme] or Cosmic.SelectedTheme).TitleBarHeight or 35
+
+    -- Ensure selected theme exists before accessing properties
+    local selectedThemeData = (type(config.Theme) == "string" and Cosmic.Themes[config.Theme]) or (type(config.Theme) == "table" and config.Theme) or Cosmic.SelectedTheme
+    if not selectedThemeData then
+        warn("CosmicUI: Specified or default theme ('" .. tostring(config.Theme) .. "' or 'Cosmic Dark') not found. Falling back to basic defaults.")
+        selectedThemeData = Cosmic.Themes["Cosmic Dark"] or {} -- Fallback to Cosmic Dark or empty table
+    end
+
+    config.TopbarHeight = config.TopbarHeight or selectedThemeData.TitleBarHeight or 35
 
     -- Rayfield specific configs
     config.ConfigurationSaving = config.ConfigurationSaving or { Enabled = false }
