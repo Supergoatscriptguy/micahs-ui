@@ -450,15 +450,19 @@ function Starlight:CreateWindow(config)
         print("Starlight: Window destroyed.")
     end
 
-    function window:AddTab(title, iconAsset)
+    function window:AddTab(config)
+        -- config = { Name = "Tab Name", Icon = "rbxassetid://..." }
+        local tabConfig = config or {}
+        tabConfig.Name = tabConfig.Name or "Tab" -- Default name if not provided
+
         local tab = {}
         local tabOrder = #self.Tabs + 1
 
         -- Tab Button
         local tabButton = Instance.new("TextButton")
-        tabButton.Name = title:gsub("%s+", "") .. "TabButton"
+        tabButton.Name = tabConfig.Name:gsub("%s+", "") .. "TabButton"
         tabButton.Size = UDim2.new(0, 100, 1, -Starlight.Theme.SmallPadding.Offset * 2) -- Auto width based on text later?
-        tabButton.Text = "  " .. title -- Padding for icon
+        tabButton.Text = "  " .. tabConfig.Name -- Padding for icon
         tabButton.LayoutOrder = tabOrder
         tabButton.AutoButtonColor = false
         tabButton.Parent = self.TabBar
@@ -466,11 +470,11 @@ function Starlight:CreateWindow(config)
         tabButton.TextXAlignment = Enum.TextXAlignment.Left
         tabButton.TextColor3 = Starlight.Theme.TextSecondary -- Dimmer when inactive
 
-        local tabIcon = CreateIcon(iconAsset or Starlight.Theme.Icons.DefaultTab, tabButton, UDim2.new(0, 18, 0, 18), UDim2.new(0, Starlight.Theme.SmallPadding.Offset * 2, 0.5, -9), Starlight.Theme.TextSecondary)
+        local tabIcon = CreateIcon(tabConfig.Icon or Starlight.Theme.Icons.DefaultTab, tabButton, UDim2.new(0, 18, 0, 18), UDim2.new(0, Starlight.Theme.SmallPadding.Offset * 2, 0.5, -9), Starlight.Theme.TextSecondary)
 
         -- Tab Content Page
         local contentPage = Instance.new("ScrollingFrame") -- Use ScrollingFrame for content
-        contentPage.Name = title:gsub("%s+", "") .. "Content"
+        contentPage.Name = tabConfig.Name:gsub("%s+", "") .. "Content"
         contentPage.Size = UDim2.new(1, 0, 1, 0)
         contentPage.BackgroundTransparency = 1
         contentPage.BorderSizePixel = 0
@@ -491,7 +495,7 @@ function Starlight:CreateWindow(config)
         end)
 
         -- Tab Object
-        tab.Title = title
+        tab.Title = tabConfig.Name
         tab.Button = tabButton
         tab.Icon = tabIcon
         tab.ContentPage = contentPage
@@ -510,6 +514,8 @@ function Starlight:CreateWindow(config)
         function tab:AddSlider(sldConfig) return Starlight:_CreateSlider(self, sldConfig) end
         -- ... Add other element creation methods here ...
 
+        table.insert(self.Tabs, tab) -- Add the tab object to the window's list
+
         -- Activate the first tab added
         if tabOrder == 1 then
             self:SetActiveTab(tab)
@@ -518,8 +524,14 @@ function Starlight:CreateWindow(config)
             tabButton.BackgroundColor3 = Starlight.Theme.Secondary
             tabButton.TextColor3 = Starlight.Theme.TextSecondary
             tabIcon.ImageColor3 = Starlight.Theme.TextSecondary
-            if tabButton:FindFirstChildWhichIsA("UIStroke") then tabButton.UIStroke.Transparency = 1 end
+            local stroke = tabButton:FindFirstChildWhichIsA("UIStroke")
+            if stroke then stroke.Transparency = 1 end
         end
+
+        -- Add click listener to the button AFTER the tab object is created
+        tabButton.MouseButton1Click:Connect(function()
+            self:SetActiveTab(tab)
+        end)
 
         return tab
     end
