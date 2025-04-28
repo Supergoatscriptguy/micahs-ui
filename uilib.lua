@@ -228,6 +228,7 @@ function Starlight:CreateWindow(config)
     local shadowCorner = Instance.new("UICorner")
     shadowCorner.CornerRadius = UDim.new(mainFrame.UICorner.CornerRadius.Scale, mainFrame.UICorner.CornerRadius.Offset + 2)
     shadowCorner.Parent = shadow
+    task.defer(ApplyThemeStyle, shadow, "Shadow") -- Defer shadow styling
 
     -- Top Bar (Optional)
     local topBar
@@ -237,7 +238,7 @@ function Starlight:CreateWindow(config)
         topBar.Size = UDim2.new(1, 0, 0, config.TopbarHeight)
         topBar.LayoutOrder = -1 -- Ensure it's above content
         topBar.Parent = mainFrame
-        ApplyThemeStyle(topBar, "TitleBar")
+        task.defer(ApplyThemeStyle, topBar, "TitleBar") -- Defer topBar styling
 
         local titleLabel = Instance.new("TextLabel")
         titleLabel.Name = "TitleLabel"
